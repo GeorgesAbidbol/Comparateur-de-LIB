@@ -43,6 +43,18 @@ mode « 16 bit Extended » (cible).
 - Règle déduite : un attribut source ne peut être utilisé qu'une fois, et une fois
   branché il disparaît de la liste.
 
+## Export (`reference/fixturefix-export.png`)
+
+« Export all » ouvre « Export location » avec des boutons :
+- **Downloads** ;
+- **un bouton par version MA2 installée détectée** (`gma2_V_3.9.60\library`,
+  `gma2_V_3.9.61\library`) ;
+- **Custom location** (dernier dossier personnalisé mémorisé) ;
+- **Choose directory…**
+
+Pour nous : un bouton par dossier onPC MA3 détecté, **un bouton par clé USB MA3
+branchée** (`grandMA3_library`), Téléchargements, dossier mémorisé, parcourir.
+
 ## Traduction pour MA3 / GDTF
 
 | Fixture Fix (MA2) | Comparateur de LIB (MA3) |
@@ -58,5 +70,5 @@ mode « 16 bit Extended » (cible).
 - [x] Le dialogue de remplacement (↻).
 - [ ] Le rendu jaune après remplacement.
 - [ ] L'ajout d'un attribut virtuel (bleu).
-- [ ] Le dialogue d'export (noms fabricant/fixture, destination).
+- [x] Le choix de destination d'export.
 - [ ] La vue avec « Instances view » désactivé.
