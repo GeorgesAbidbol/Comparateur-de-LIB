@@ -30,6 +30,19 @@ mode « 16 bit Extended » (cible).
 - **Icônes d'en-tête** : source = tout cocher, trier, supprimer ;
   cible = trier, exporter (→), supprimer.
 
+## Remplacement d'un attribut cible (`reference/fixturefix-remplacement.png`)
+
+- Le bouton ↻ n'apparaît que sur les lignes **orange de la cible** (attribut que
+  la source n'a pas : G2<>, G3, Rate…).
+- Il ouvre une liste **« Available attributes »** : uniquement les attributs de la
+  source qui n'ont pas de correspondance (les orange de gauche : Position MSpeed,
+  LEDEngineEffects, LEDEngineEffectRate, LEDEngineEffectStepTime, FocusMode,
+  AnimationWheel, Macros/PWMFrequency…). Chaque bouton affiche nom court + ATTRIBUT.
+- Choisir un attribut renomme le canal cible avec l'attribut source : les données
+  du show sur cet attribut sont conservées (ligne jaune).
+- Règle déduite : un attribut source ne peut être utilisé qu'une fois, et une fois
+  branché il disparaît de la liste.
+
 ## Traduction pour MA3 / GDTF
 
 | Fixture Fix (MA2) | Comparateur de LIB (MA3) |
@@ -42,7 +55,8 @@ mode « 16 bit Extended » (cible).
 
 ## Captures encore utiles
 
-- [ ] Le dialogue de remplacement (↻) et le rendu jaune.
+- [x] Le dialogue de remplacement (↻).
+- [ ] Le rendu jaune après remplacement.
 - [ ] L'ajout d'un attribut virtuel (bleu).
 - [ ] Le dialogue d'export (noms fabricant/fixture, destination).
 - [ ] La vue avec « Instances view » désactivé.
