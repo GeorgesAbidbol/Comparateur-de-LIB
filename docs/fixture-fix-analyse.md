@@ -53,7 +53,7 @@ mode « 16 bit Extended » (cible).
 - **Choose directory…**
 
 Pour nous : un bouton par dossier onPC MA3 détecté, **un bouton par clé USB MA3
-branchée** (`grandMA3_library`), Téléchargements, dossier mémorisé, parcourir.
+branchée** (`grandMA3\gma3_library`), Téléchargements, dossier mémorisé, parcourir.
 
 ## Réglages (`reference/fixturefix-reglages.png`)
 

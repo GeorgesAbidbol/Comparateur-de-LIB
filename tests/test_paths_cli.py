@@ -3,11 +3,12 @@ from ma3lib import cli, ma3_paths
 
 def test_find_and_deploy(tmp_path, bad_bar):
     usb = tmp_path / "USB"
-    (usb / ma3_paths.USB_LIBRARY_DIR).mkdir(parents=True)
+    (usb / "grandMA3" / "gma3_library").mkdir(parents=True)
     targets = [t for t in ma3_paths.find_targets(extra_roots=[usb]) if t.kind == "usb"]
     assert len(targets) == 1
     dest = ma3_paths.deploy(bad_bar, targets[0])
-    assert dest.exists() and dest.parent.name == ma3_paths.FIXTURE_SUBDIR
+    assert dest == usb / "grandMA3" / "gma3_library" / "fixturetypes" / bad_bar.name
+    assert dest.exists()
 
 
 def test_cli(bad_bar, broken, capsys):

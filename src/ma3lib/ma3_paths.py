@@ -1,10 +1,9 @@
 """Où déposer les librairies pour grandMA3 (clé USB et onPC).
 
-À VÉRIFIER sur la clé et le PC de Jo : le sous-dossier exact des fixture types.
-Ce qui est confirmé (README de ma3-TC-Sniffer, testé en 2.3.2.0) :
-  - clé USB : <racine>/grandMA3_library/...
-  - onPC    : .../MALightingTechnology/gma3_library/...
-Le sous-dossier "fixturetypes" est une hypothèse, modifiable dans les réglages.
+Confirmé par Jo (31/10/2026, clé préparée par sa console 2.3.2.0) :
+  - clé USB : <racine>\\grandMA3\\gma3_library\\fixturetypes   (ex. E:\\grandMA3\\gma3_library\\fixturetypes)
+  - onPC    : ...\\MALightingTechnology\\gma3_library\\fixturetypes  (à confirmer)
+On accepte aussi <racine>\\grandMA3_library, cité dans le README de ma3-TC-Sniffer.
 """
 
 from __future__ import annotations
@@ -17,9 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # --- Réglages ------------------------------------------------------------
-USB_LIBRARY_DIR = "grandMA3_library"
+USB_LIBRARY_DIRS = ("grandMA3/gma3_library", "grandMA3_library")  # le premier est confirmé
 ONPC_LIBRARY_DIR = "gma3_library"
-FIXTURE_SUBDIR = "fixturetypes"  # hypothèse, à confirmer
+FIXTURE_SUBDIR = "fixturetypes"
 # -------------------------------------------------------------------------
 
 
@@ -75,9 +74,11 @@ def find_targets(extra_roots: list[Path] | None = None) -> list[Target]:
         if path.is_dir():
             targets.append(Target(f"onPC ({path})", path, "onpc"))
     for root in [*removable_roots(), *(extra_roots or [])]:
-        lib = root / USB_LIBRARY_DIR
-        if lib.is_dir():
-            targets.append(Target(f"Clé USB ({root})", lib, "usb"))
+        for sub in USB_LIBRARY_DIRS:
+            lib = root / sub
+            if lib.is_dir():
+                targets.append(Target(f"Clé USB ({root})", lib, "usb"))
+                break
     return targets
 
 
