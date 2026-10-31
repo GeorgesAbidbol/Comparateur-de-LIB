@@ -56,7 +56,61 @@ def diagnose(ft: FixtureType) -> list[Finding]:
     findings += _check_mode_links(ft)
     findings += _check_instances(ft)
     findings += _check_dimmer(ft)
+    findings += _check_3d_only(ft)
     return findings
+
+
+def useful_geometries(ft: FixtureType) -> set[str]:
+    """Géométries utiles au pilotage : racines de mode, géométries portant un canal,
+    leurs parents, et les références vers un modèle qui porte des canaux."""
+    useful: set[str] = {m.geometry for m in ft.modes}
+    useful |= {ch.geometry for m in ft.modes for ch in m.channels}
+    changed = True
+    while changed:
+        before = len(useful)
+        for g in ft.all_geometries():
+            if g.name in useful:
+                continue
+            if any(c.name in useful for c in g.walk() if c is not g):
+                useful.add(g.name)
+            elif g.is_reference and g.reference in useful:
+                useful.add(g.name)
+        changed = len(useful) != before
+    return useful
+
+
+def geometries_3d_only(ft: FixtureType) -> list[Geometry]:
+    """Sous-arbres qui ne portent aucun canal dans aucun mode (pur visuel 3D).
+    Ne renvoie que le sommet de chaque sous-arbre supprimable."""
+    useful = useful_geometries(ft)
+    out: list[Geometry] = []
+
+    def visit(g: Geometry) -> None:
+        if g.name not in useful:
+            out.append(g)
+            return
+        for c in g.children:
+            visit(c)
+
+    for root in ft.geometries:
+        visit(root)
+    return out
+
+
+def _check_3d_only(ft: FixtureType) -> list[Finding]:
+    if not ft.modes:
+        return []
+    tops = geometries_3d_only(ft)
+    if not tops:
+        return []
+    total = sum(1 for g in tops for _ in g.walk())
+    refs = sum(1 for g in tops for x in g.walk() if x.is_reference)
+    msg = f"{total} géométrie(s) sans aucun canal, uniquement pour la 3D : supprimables au nettoyage"
+    if refs:
+        msg += f" (dont {refs} référence(s))"
+    return [Finding(ALERTE, "geometries_3d_seulement", msg,
+                    [f"{g.path()} [{g.kind}]" + (f" + {sum(1 for _ in g.walk()) - 1} enfant(s)" if g.children else "")
+                     for g in tops])]
 
 
 # --------------------------------------------------------------------------
@@ -113,7 +167,7 @@ def _check_mode_links(ft: FixtureType) -> list[Finding]:
     used_tops.update(g.reference for g in ft.all_geometries() if g.is_reference)
     orphans = sorted(top - used_tops)
     if orphans and ft.modes:
-        out.append(Finding(ALERTE, "geometrie_orpheline",
+        out.append(Finding(INFO, "geometrie_orpheline",
                            f"{len(orphans)} géométrie(s) de premier niveau utilisée(s) par aucun mode ni référence",
                            orphans))
     return out

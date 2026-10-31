@@ -45,5 +45,19 @@ def test_tricky_real_world_patterns(tricky):
     # Head Mode 1 / Head Mode 2 : une copie par mode, pas des instances
     assert c["variantes_par_mode"].level == diagnostic.INFO
     assert "instances_similaires" not in c
-    # connecteurs DMX 5Pin / 3Pin sans canaux : ignorés
-    assert not any("Pin" in d for f in c.values() for d in f.details)
+    # connecteurs DMX 5Pin / 3Pin sans canaux : pas pris pour des instances
+    for code in ("instances_sans_reference", "instances_similaires", "references_sans_canaux"):
+        assert not any("Pin" in d for d in c.get(code, diagnostic.Finding("", "", "")).details)
+
+
+def test_3d_only_geometries(tricky, good_bar, bad_bar):
+    ft = gdtf.load(tricky)
+    removable = {g.name for g in diagnostic.geometries_3d_only(ft)}
+    # références décoratives, leur modèle, connecteurs, lentille sans canal
+    assert removable == {"Px_1", "Px_2", "Px_3", "DMX 5Pin IN", "DMX 3Pin IN", "Px", "Lens"}
+    # les enveloppes qui portent les canaux et les racines de mode restent
+    assert {"Group_1", "Base", "Head Mode 1", "Lens2"} <= diagnostic.useful_geometries(ft)
+    assert "geometries_3d_seulement" in codes(tricky)
+    # fixtures sans 3D superflue : rien à supprimer
+    assert diagnostic.geometries_3d_only(gdtf.load(good_bar)) == []
+    assert diagnostic.geometries_3d_only(gdtf.load(bad_bar)) == []
