@@ -2,7 +2,7 @@
 
 Confirmé par Jo (31/10/2026, clé préparée par sa console 2.3.2.0) :
   - clé USB : <racine>\\grandMA3\\gma3_library\\fixturetypes   (ex. E:\\grandMA3\\gma3_library\\fixturetypes)
-  - onPC    : ...\\MALightingTechnology\\gma3_library\\fixturetypes  (confirmé : C:\\\\ProgramData\\\\MALightingTechnology\\\\gma3_library\\\\fixturetypes)
+  - onPC    : ...\\MALightingTechnology\\gma3_library\\fixturetypes  (confirmé : C:\\ProgramData\\MALightingTechnology\\gma3_library\\fixturetypes)
 On accepte aussi <racine>\\grandMA3_library, cité dans le README de ma3-TC-Sniffer.
 """
 
