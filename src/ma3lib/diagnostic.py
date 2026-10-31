@@ -58,7 +58,38 @@ def diagnose(ft: FixtureType) -> list[Finding]:
     findings += _check_dimmer(ft)
     findings += _check_3d_only(ft)
     findings += _check_duplicate_templates(ft)
+    findings += _check_kind_mismatch(ft)
     return findings
+
+
+def _check_kind_mismatch(ft: FixtureType) -> list[Finding]:
+    """Géométries jumelles (mêmes canaux, même nombre d'enfants) de types différents,
+    ex. segment A en Beam et segment B en Geometry. Pour Jo, tout ce qui émet de la
+    lumière doit être un Beam (simulation 3D) : on propose d'aligner sur Beam."""
+    out: list[Finding] = []
+    by_name = {g.name: g for g in ft.all_geometries()}
+    for mode in ft.modes:
+        attrs: dict[str, list[str]] = defaultdict(list)
+        for ch in mode.channels:
+            attrs[ch.geometry] += [lc.attribute for lc in ch.logical_channels]
+        twins: dict[tuple, list[Geometry]] = defaultdict(list)
+        for name, a in attrs.items():
+            g = by_name.get(name)
+            if g is None or g.is_reference or g.name == mode.geometry:
+                continue
+            twins[(tuple(sorted(a)), len(g.children))].append(g)
+        for members in twins.values():
+            kinds = {g.kind for g in members}
+            if len(kinds) > 1:
+                target = "Beam" if "Beam" in kinds else sorted(kinds)[0]
+                odd = [f"{g.name} [{g.kind}] -> {target}" for g in members if g.kind != target]
+                out.append(Finding(
+                    ALERTE, "types_incoherents",
+                    f"Mode « {mode.name} » : géométries jumelles de types différents "
+                    f"({', '.join(sorted(kinds))}), à aligner sur {target}",
+                    odd,
+                ))
+    return out
 
 
 def duplicate_templates(ft: FixtureType) -> list[list[str]]:

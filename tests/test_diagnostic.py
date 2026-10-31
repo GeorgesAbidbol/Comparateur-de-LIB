@@ -87,3 +87,17 @@ def test_same_mode_twin_templates_are_intentional(tmp_path):
     ft = gdtf.load(write_gdtf(tmp_path / "t.gdtf", fixture_xml(
         "Twin", geos, f'<DMXMode Name="M" Geometry="Root"><DMXChannels>{chans}</DMXChannels></DMXMode>')))
     assert diagnostic.duplicate_templates(ft) == []
+
+
+def test_kind_mismatch(tmp_path):
+    from conftest import channel, fixture_xml, write_gdtf
+    geos = '<Geometry Name="Root"><Beam Name="Seg A"/><Geometry Name="Seg B"/></Geometry>'
+    chans = channel("Seg A", "Dimmer", 1) + channel("Seg B", "Dimmer", 2)
+    ft = gdtf.load(write_gdtf(tmp_path / "t.gdtf", fixture_xml(
+        "Kind", geos, f'<DMXMode Name="M" Geometry="Root"><DMXChannels>{chans}</DMXChannels></DMXMode>')))
+    f = codes_ft(ft)["types_incoherents"]
+    assert f.details == ["Seg B [Geometry] -> Beam"]
+
+
+def codes_ft(ft):
+    return {f.code: f for f in diagnostic.diagnose(ft)}
