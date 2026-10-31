@@ -61,3 +61,17 @@ def test_3d_only_geometries(tricky, good_bar, bad_bar):
     # fixtures sans 3D superflue : rien à supprimer
     assert diagnostic.geometries_3d_only(gdtf.load(good_bar)) == []
     assert diagnostic.geometries_3d_only(gdtf.load(bad_bar)) == []
+
+
+def test_duplicate_templates(tmp_path):
+    from conftest import channel, fixture_xml, write_gdtf
+    refs = lambda tpl, n: "".join(f'<GeometryReference Name="{tpl}_{i}" Geometry="{tpl}"/>' for i in range(n))
+    geos = (f'<Geometry Name="Root M1">{refs("RGB Pix Mode 1", 2)}</Geometry>'
+            f'<Geometry Name="Root M2">{refs("RGB Pix Mode 2", 2)}</Geometry>'
+            '<Beam Name="RGB Pix Mode 1"/><Beam Name="RGB Pix Mode 2"/>')
+    rgb = lambda tpl: "".join(channel(tpl, a, k, "Overwrite") for k, a in enumerate(("ColorAdd_R", "ColorAdd_G", "ColorAdd_B"), 1))
+    modes = (f'<DMXMode Name="M1" Geometry="Root M1"><DMXChannels>{rgb("RGB Pix Mode 1")}</DMXChannels></DMXMode>'
+             f'<DMXMode Name="M2" Geometry="Root M2"><DMXChannels>{rgb("RGB Pix Mode 2")}</DMXChannels></DMXMode>')
+    ft = gdtf.load(write_gdtf(tmp_path / "t.gdtf", fixture_xml("Dup", geos, modes)))
+    assert diagnostic.duplicate_templates(ft) == [["RGB Pix Mode 1", "RGB Pix Mode 2"]]
+    assert "modeles_en_double" in {f.code for f in diagnostic.diagnose(ft)}

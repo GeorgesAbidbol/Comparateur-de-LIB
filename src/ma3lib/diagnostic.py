@@ -57,7 +57,41 @@ def diagnose(ft: FixtureType) -> list[Finding]:
     findings += _check_instances(ft)
     findings += _check_dimmer(ft)
     findings += _check_3d_only(ft)
+    findings += _check_duplicate_templates(ft)
     return findings
+
+
+def duplicate_templates(ft: FixtureType) -> list[list[str]]:
+    """Modèles de référence qui décrivent le même type d'instance (même type de
+    géométrie, mêmes attributs de canaux) sous des noms différents, souvent un par mode.
+    Règle de Jo : un seul modèle (ex. « Pixel RGB ») partagé par tous les modes."""
+    referenced = {g.reference for g in ft.all_geometries() if g.is_reference}
+    by_key: dict[tuple, list[str]] = defaultdict(list)
+    for name in sorted(referenced):
+        tpl = ft.top_level(name)
+        if tpl is None:
+            continue
+        names = _subtree_names(tpl)
+        attrs = set()
+        for mode in ft.modes:
+            attrs |= {lc.attribute for ch in mode.channels if ch.geometry in names
+                      for lc in ch.logical_channels}
+        if not attrs:
+            continue  # modèle purement visuel : traité par geometries_3d_only
+        by_key[(_signature(tpl), tuple(sorted(attrs)))].append(name)
+    return [names for names in by_key.values() if len(names) > 1]
+
+
+def _check_duplicate_templates(ft: FixtureType) -> list[Finding]:
+    groups = duplicate_templates(ft)
+    if not groups:
+        return []
+    return [Finding(
+        ALERTE, "modeles_en_double",
+        f"{len(groups)} type(s) d'instance décrit(s) par plusieurs modèles de référence "
+        "(un par mode) : à fusionner en un seul modèle partagé",
+        [" = ".join(g) for g in groups],
+    )]
 
 
 def useful_geometries(ft: FixtureType) -> set[str]:
