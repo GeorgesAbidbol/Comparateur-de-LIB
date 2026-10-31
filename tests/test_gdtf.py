@@ -39,3 +39,43 @@ def test_not_a_gdtf(tmp_path):
         zf.writestr("autre.xml", "<a/>")
     with pytest.raises(gdtf.GdtfError):
         gdtf.load(p)
+
+
+MA3_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.3.2.0">
+  <FixtureType Name="Bar" Guid="AA 47 6C 50 FE 73 43 7F 9B 4C 1B 3A 77 16 45 25" ShortName="Bar" Manufacturer="Test">
+    <AttributeDefinitions><Attributes>
+      <Attribute Name="Dimmer" Feature="Dimmer.Dimmer"/><Attribute Name="ColorRGB_R" Feature="Color.RGB"/>
+    </Attributes></AttributeDefinitions>
+    <Geometries>
+      <Geometry Name="Body"><Beam Name="Seg">
+        <GeometryReference Name="Px 1" Geometry="Px"><Break/></GeometryReference>
+        <GeometryReference Name="Px 2" Geometry="Px"><Break DMXPatch="4"/></GeometryReference>
+      </Beam></Geometry>
+      <Beam Name="Px"/>
+    </Geometries>
+    <DMXModes><DMXMode Name="M JO" Geometry="Body" XYZ="No" DiveInto="Yes"><DMXChannels>
+      <DMXChannel Coarse="1" Fine="2" DefaultChannelFunction="Dimmer.Dimmer" Geometry="Body.Seg">
+        <LogicalChannel Attribute="Dimmer"><ChannelFunction Name="Dimmer" Attribute="Dimmer" Default="000000"/></LogicalChannel>
+      </DMXChannel>
+      <DMXChannel DefaultChannelFunction="Dimmer.Dimmer" Geometry="Px">
+        <LogicalChannel Attribute="Dimmer"><ChannelFunction Name="Dimmer" Attribute="Dimmer"/></LogicalChannel>
+      </DMXChannel>
+      <DMXChannel Coarse="3" Geometry="Px">
+        <LogicalChannel Attribute="ColorRGB_R"><ChannelFunction Name="R" Attribute="ColorRGB_R"/></LogicalChannel>
+      </DMXChannel>
+    </DMXChannels></DMXMode></DMXModes>
+  </FixtureType>
+</GMA3>"""
+
+
+def test_load_ma3_xml(tmp_path):
+    p = tmp_path / "test bar.xml"
+    p.write_text(MA3_XML, encoding="utf-8")
+    ft = gdtf.load(p)
+    assert ft.format == "ma3" and ft.data_version == "2.3.2.0"
+    assert ft.fixture_type_id == "AA476C50-FE73-437F-9B4C-1B3A77164525"
+    ch = ft.modes[0].channels
+    assert ch[0].offset == [1, 2] and ch[0].geometry == "Seg" and ch[0].geometry_path == "Body.Seg"
+    assert ch[1].is_virtual
+    assert [b.dmx_offset for r in ft.geometry("Seg").children for b in r.breaks] == [1, 4]

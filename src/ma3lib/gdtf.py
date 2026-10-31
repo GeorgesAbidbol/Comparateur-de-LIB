@@ -1,4 +1,5 @@
-"""Lecture d'un fichier GDTF (archive zip contenant description.xml).
+"""Lecture d'un fixture type : GDTF (archive zip contenant description.xml)
+ou XML exporté par grandMA3 2.3.2.0 (racine <GMA3>, voir docs/ma3-xml-notes.md).
 
 On ne garde que ce qui sert au comparateur et à l'atelier géométries :
 attributs, géométries (arbre complet), modes DMX, canaux et relations.
@@ -89,6 +90,7 @@ class DMXChannel:
     geometry: str
     offset: Optional[list[int]]  # None = canal virtuel (pas d'adresse DMX)
     dmx_break: str = "1"
+    geometry_path: str = ""  # MA3 : chemin complet pointé (Base.Body.Plate)
     logical_channels: list[LogicalChannel] = field(default_factory=list)
 
     @property
@@ -144,6 +146,7 @@ class FixtureType:
     long_name: str = ""
     fixture_type_id: str = ""
     data_version: str = ""
+    format: str = "gdtf"  # "gdtf" ou "ma3"
     attributes: dict[str, Attribute] = field(default_factory=dict)
     geometries: list[Geometry] = field(default_factory=list)  # racines
     modes: list[DMXMode] = field(default_factory=list)
@@ -178,7 +181,7 @@ class FixtureType:
 # --------------------------------------------------------------------------
 
 def load(path: str | Path) -> FixtureType:
-    """Charge un fichier .gdtf (ou un description.xml seul)."""
+    """Charge un .gdtf, un description.xml seul, ou un fixture type MA3 (.xml)."""
     path = Path(path)
     if path.suffix.lower() == ".xml":
         data = path.read_bytes()
@@ -200,8 +203,9 @@ def parse_description(data: bytes) -> FixtureType:
         root = ET.parse(io.BytesIO(data)).getroot()
     except ET.ParseError as exc:
         raise GdtfError(f"description.xml illisible : {exc}") from exc
-    if root.tag != "GDTF":
-        raise GdtfError(f"racine inattendue <{root.tag}>, <GDTF> attendu")
+    if root.tag not in ("GDTF", "GMA3"):
+        raise GdtfError(f"racine inattendue <{root.tag}>, <GDTF> ou <GMA3> attendu")
+    is_ma3 = root.tag == "GMA3"
     node = root.find("FixtureType")
     if node is None:
         raise GdtfError("pas de <FixtureType> dans description.xml")
@@ -211,8 +215,9 @@ def parse_description(data: bytes) -> FixtureType:
         manufacturer=node.get("Manufacturer", ""),
         short_name=node.get("ShortName", ""),
         long_name=node.get("LongName", ""),
-        fixture_type_id=node.get("FixtureTypeID", ""),
+        fixture_type_id=node.get("FixtureTypeID", "") or _guid_from_ma3(node.get("Guid", "")),
         data_version=root.get("DataVersion", ""),
+        format="ma3" if is_ma3 else "gdtf",
         xml_root=root,
     )
 
@@ -229,7 +234,7 @@ def parse_description(data: bytes) -> FixtureType:
         ft.geometries = [_parse_geometry(child, None) for child in geos if child.tag in GEOMETRY_TAGS]
 
     for m in node.iterfind("DMXModes/DMXMode"):
-        ft.modes.append(_parse_mode(m))
+        ft.modes.append(_parse_mode(m, is_ma3))
 
     return ft
 
@@ -246,26 +251,32 @@ def _parse_geometry(el: ET.Element, parent: Optional[Geometry]) -> Geometry:
     if g.is_reference:
         for b in el.iterfind("Break"):
             g.breaks.append(Break(
-                dmx_offset=_int(b.get("DMXOffset"), 1),
+                dmx_offset=_int(b.get("DMXOffset") or b.get("DMXPatch"), 1),
                 dmx_break=_int(b.get("DMXBreak"), 1),
             ))
     g.children = [_parse_geometry(c, g) for c in el if c.tag in GEOMETRY_TAGS]
     return g
 
 
-def _parse_mode(el: ET.Element) -> DMXMode:
+def _parse_mode(el: ET.Element, is_ma3: bool = False) -> DMXMode:
     mode = DMXMode(
         name=el.get("Name", ""),
         geometry=el.get("Geometry", ""),
         description=el.get("Description", ""),
     )
     for ch in el.iterfind("DMXChannels/DMXChannel"):
-        offset_raw = (ch.get("Offset") or "None").strip()
-        offset = None if offset_raw in ("None", "") else [int(x) for x in offset_raw.split(",")]
+        geo = ch.get("Geometry", "")
+        if is_ma3:
+            parts = [ch.get(k) for k in MA3_BYTES if ch.get(k)]
+            offset = [int(x) for x in parts] or None
+        else:
+            offset_raw = (ch.get("Offset") or "None").strip()
+            offset = None if offset_raw in ("None", "") else [int(x) for x in offset_raw.split(",")]
         channel = DMXChannel(
-            geometry=ch.get("Geometry", ""),
+            geometry=geo.split(".")[-1] if is_ma3 else geo,
             offset=offset,
             dmx_break=ch.get("DMXBreak", "1"),
+            geometry_path=geo if is_ma3 else "",
         )
         for lc in ch.iterfind("LogicalChannel"):
             logical = LogicalChannel(attribute=_last(lc.get("Attribute", "")))
@@ -284,6 +295,19 @@ def _parse_mode(el: ET.Element) -> DMXMode:
             follower=r.get("Follower", ""), type=r.get("Type", ""),
         ))
     return mode
+
+
+# Ordre des octets d'un canal MA3, du plus au moins significatif (Ultra/Uber : noms supposés,
+# aucun exemple 24/32 bits vu pour l'instant).
+MA3_BYTES = ("Coarse", "Fine", "Ultra", "Uber")
+
+
+def _guid_from_ma3(guid: str) -> str:
+    """'AA 47 6C 50 FE 73 ...' -> 'AA476C50-FE73-...' (forme GDTF)."""
+    h = guid.replace(" ", "")
+    if len(h) != 32:
+        return guid
+    return f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:]}"
 
 
 def _int(value: Optional[str], default: int) -> int:
