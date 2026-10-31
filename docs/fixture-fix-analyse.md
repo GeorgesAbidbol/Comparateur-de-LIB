@@ -55,6 +55,24 @@ mode « 16 bit Extended » (cible).
 Pour nous : un bouton par dossier onPC MA3 détecté, **un bouton par clé USB MA3
 branchée** (`grandMA3_library`), Téléchargements, dossier mémorisé, parcourir.
 
+## Réglages (`reference/fixturefix-reglages.png`)
+
+- **Startup** : recharger le dernier projet au démarrage (activé chez Jo).
+- **Custom export folder** : chemin + « Select Folder » (chez Jo : `D:\Desktop`).
+- **Naming** : 4 choix indépendants pour nommer le fixture exporté.
+  - Nom fabricant / nom court fabricant : fabricant de la cible, « Fixture Fix »
+    (choix de Jo), nom du projet, ou personnalisé.
+  - Nom fixture / nom court fixture : combinaisons de nom d'onglet, nom cible,
+    nom source, nom de projet et mode (`TabName To TargetName`,
+    `Target Name From Source Name` (choix de Jo), `ProjectName@TargetName`,
+    `TargetName_Mode`…).
+- **After export** : ouvrir le dossier après export (activé chez Jo).
+
+Pour nous (GDTF) : ces choix alimentent `Manufacturer`, `ShortName`, `Name`,
+`LongName` de `<FixtureType>` et le nom du fichier `Fabricant@Fixture@Commentaire.gdtf`.
+Il faudra aussi un **nouveau `FixtureTypeID` (GUID)** pour que MA3 ne confonde pas
+le fixture modifié avec l'original. Valeurs par défaut reprises de celles de Jo.
+
 ## Traduction pour MA3 / GDTF
 
 | Fixture Fix (MA2) | Comparateur de LIB (MA3) |
