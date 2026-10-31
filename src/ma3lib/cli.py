@@ -2,6 +2,7 @@
 
     python -m ma3lib info  <fichier.gdtf>         contenu : modes, canaux, géométries
     python -m ma3lib check <fichier.gdtf> [...]   diagnostic géométries / dimmer
+    python -m ma3lib subfix <fichier> [mode]       sous-fixtures comme le SubfixtureOverview MA3
     python -m ma3lib targets                      destinations MA3 détectées
     python -m ma3lib share-search <mots>          recherche sur GDTF Share
     python -m ma3lib share-get <rid> [dossier]    téléchargement depuis GDTF Share
@@ -13,7 +14,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import diagnostic, gdtf, ma3_paths
+from . import diagnostic, gdtf, ma3_paths, subfixtures
 
 LEVEL_MARK = {diagnostic.ERREUR: "XX", diagnostic.ALERTE: "!!", diagnostic.INFO: "--"}
 
@@ -67,6 +68,19 @@ def cmd_check(args) -> int:
     return worst
 
 
+def cmd_subfix(args) -> int:
+    ft = gdtf.load(args.file)
+    modes = [m for m in ft.modes if not args.mode or args.mode.lower() in m.name.lower()]
+    for mode in modes:
+        print(f"== Mode « {mode.name} »")
+        tree = subfixtures.overview(ft, mode)
+        if tree is None:
+            print("  géométrie racine introuvable")
+            continue
+        print("\n".join("  " + line for line in subfixtures.lines(tree, max_children=args.max)))
+    return 0
+
+
 def cmd_targets(args) -> int:
     targets = ma3_paths.find_targets()
     if not targets:
@@ -100,6 +114,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("info"); s.add_argument("file"); s.set_defaults(func=cmd_info)
     s = sub.add_parser("check"); s.add_argument("files", nargs="+"); s.set_defaults(func=cmd_check)
+    s = sub.add_parser("subfix"); s.add_argument("file"); s.add_argument("mode", nargs="?", default="")
+    s.add_argument("--max", type=int, default=3, help="enfants affichés par niveau (0 = tous)")
+    s.set_defaults(func=cmd_subfix)
     s = sub.add_parser("targets"); s.set_defaults(func=cmd_targets)
     s = sub.add_parser("share-search"); s.add_argument("words", nargs="+"); s.set_defaults(func=cmd_share_search)
     s = sub.add_parser("share-get"); s.add_argument("rid", type=int); s.add_argument("dest", nargs="?", default="gdtf")
