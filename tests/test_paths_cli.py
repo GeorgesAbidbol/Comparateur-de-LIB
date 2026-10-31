@@ -14,6 +14,6 @@ def test_find_and_deploy(tmp_path, bad_bar):
 def test_cli(bad_bar, broken, capsys):
     assert cli.main(["info", str(bad_bar)]) == 0
     out = capsys.readouterr().out
-    assert "Pixel4 [Beam]" in out and "empreinte 12" in out
+    assert "4        Pixel4 [Beam]" in out and "empreinte 12" in out
     assert cli.main(["check", str(bad_bar)]) == 0
     assert cli.main(["check", str(broken)]) == 1

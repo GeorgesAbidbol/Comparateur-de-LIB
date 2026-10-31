@@ -18,13 +18,17 @@ from . import diagnostic, gdtf, ma3_paths
 LEVEL_MARK = {diagnostic.ERREUR: "XX", diagnostic.ALERTE: "!!", diagnostic.INFO: "--"}
 
 
-def print_tree(g: gdtf.Geometry, indent: str = "  ") -> None:
+def print_tree(g: gdtf.Geometry, index: int = 1, indent: str = "  ") -> None:
+    """Affiche l'arbre comme l'éditeur de MA3 : « n° (nb d'enfants) » puis le nom.
+    Une référence compte 1 enfant (le modèle qu'elle instancie)."""
     extra = f" -> {g.reference}" if g.is_reference else ""
     if g.breaks:
         extra += " (" + ", ".join(f"break {b.dmx_break} @ {b.dmx_offset}" for b in g.breaks) + ")"
-    print(f"{indent}{g.name} [{g.kind}]{extra}")
-    for child in g.children:
-        print_tree(child, indent + "  ")
+    kids = 1 if g.is_reference else len(g.children)
+    num = f"{index} ({kids})" if kids else f"{index}"
+    print(f"{indent}{num:<9}{g.name} [{g.kind}]{extra}")
+    for i, child in enumerate(g.children, 1):
+        print_tree(child, i, indent + "  ")
 
 
 def cmd_info(args) -> int:
@@ -32,8 +36,8 @@ def cmd_info(args) -> int:
     print(f"{ft.manufacturer} - {ft.name}  (GDTF {ft.data_version})")
     print(f"{len(ft.attributes)} attributs définis, {sum(1 for _ in ft.all_geometries())} géométries")
     print("\nGéométries :")
-    for root in ft.geometries:
-        print_tree(root)
+    for i, root in enumerate(ft.geometries, 1):
+        print_tree(root, i)
     for mode in ft.modes:
         print(f"\nMode « {mode.name} » : {len(mode.channels)} canaux, empreinte {mode.footprint}")
         for ch in mode.channels:
