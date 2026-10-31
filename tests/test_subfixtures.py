@@ -18,4 +18,5 @@ def test_channelless_levels_collapse(tmp_path):
     assert seg.attributes == ["Dimmer"]
     assert [p.name for p in seg.children] == ["Px 1", "Px 2", "Px 3"]
     assert seg.children[0].attributes == ["ColorAdd_R"]
-    assert subfixtures.lines(tree)[0].startswith("1 (1)")
+    assert subfixtures.lines(tree)[0].startswith("1 (1)    1 ")
+    assert "1.1.2" in subfixtures.lines(tree)[3]

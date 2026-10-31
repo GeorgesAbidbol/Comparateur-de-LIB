@@ -56,13 +56,17 @@ def overview(ft: FixtureType, mode: DMXMode) -> Subfixture | None:
     return Subfixture(root.name, own(root), [s for c in root.children for s in build(c)])
 
 
-def lines(sub: Subfixture, index: int = 1, depth: int = 0, max_children: int = 0) -> list[str]:
-    """Rendu texte proche de l'écran MA3 : « n° (enfants)  Nom  Attr1 Attr2… »."""
+def lines(sub: Subfixture, index: int = 1, depth: int = 0, max_children: int = 0,
+          prefix: str = "") -> list[str]:
+    """Rendu texte proche de l'écran MA3 : « n° (enfants)  ID  Nom  Attr1 Attr2… ».
+    L'ID pointé est celui qu'on tape sur la console : 1 = fixture, 1.1 = overall,
+    1.1.1 = pixel 1 de cet overall."""
     num = f"{index} ({len(sub.children)})" if sub.children else f"{index}"
-    out = [f"{'  ' * depth}{num:<8} {sub.name:<40} {'  '.join(sub.attributes)}"]
+    ident = f"{prefix}.{index}" if prefix else "1"
+    out = [f"{'  ' * depth}{num:<8} {ident:<9} {sub.name:<40} {'  '.join(sub.attributes)}"]
     for i, child in enumerate(sub.children, 1):
         if max_children and depth >= 1 and i > max_children:
             out.append(f"{'  ' * (depth + 1)}… {len(sub.children) - max_children} de plus")
             break
-        out += lines(child, i, depth + 1, max_children)
+        out += lines(child, i, depth + 1, max_children, ident)
     return out

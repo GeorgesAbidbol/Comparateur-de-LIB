@@ -56,3 +56,21 @@ de rattacher un mode retravaillé aux géométries existantes compatibles.
 - Comparer un GDTF avec sa version MA3 doit tenir compte des renommages
   d'attributs ci-dessus.
 - Format d'export : **XML MA3 direct** (choix de Jo, 31/10/2026), même format que ses exports 2.3.2.0.
+
+## Structure cible d'un fixture multi-instances (Jo)
+
+Ce que le nettoyeur doit produire, vu depuis la console :
+
+| ID | Rôle | Exemple JDC Line 1000 mode 5 |
+|---|---|---|
+| `1` | le fixture principal (main) | Control1 |
+| `1.1` | un overall : tous les pixels d'un groupe ensemble, 1 instance | RGB Segment Control Overhall A |
+| `1.1.1` … `1.1.20` | chaque pixel séparé, 1 instance chacun | RGB Single A 1 … 20 |
+
+Règles MA3 associées (vérifiées sur la console de Jo, 2.3.2.0) :
+- seules les géométries **qui portent des canaux** deviennent des sous-fixtures ;
+  un niveau sans canal (« Module A ») disparaît et ses enfants remontent ;
+- l'overall est le **parent** de ses pixels (référence de pixel en enfant du Beam overall) ;
+- ce qui émet de la lumière est un **Beam** (simulation 3D).
+
+`ma3lib subfix <fichier> [mode]` affiche cette structure sans console.
