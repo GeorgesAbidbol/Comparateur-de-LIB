@@ -45,4 +45,4 @@ Attributs renommés par MA3 à l'import :
   les librairies déjà retravaillées sont en XML MA3.
 - Comparer un GDTF avec sa version MA3 doit tenir compte des renommages
   d'attributs ci-dessus.
-- Format d'export : à décider avec Jo (XML MA3 direct ou GDTF).
+- Format d'export : **XML MA3 direct** (choix de Jo, 31/10/2026), même format que ses exports 2.3.2.0.
