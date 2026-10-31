@@ -300,6 +300,7 @@ def find_instance_groups(ft: FixtureType, min_size: int = 2) -> list[InstanceGro
     qui ne sont pas des instances.
     """
     groups: list[InstanceGroup] = []
+    channel_geos = {ch.geometry for m in ft.modes for ch in m.channels}
     parents: list[tuple[str, list[Geometry]]] = [("(racine)", ft.geometries)]
     parents += [(g.path(), g.children) for g in ft.all_geometries() if g.children]
     for parent_path, siblings in parents:
@@ -325,6 +326,9 @@ def find_instance_groups(ft: FixtureType, min_size: int = 2) -> list[InstanceGro
                     group.same_channels[mode.name] = all(p == per_instance[0] for p in per_instance)
             if not group.same_channels:
                 continue  # aucun canal : rien à gagner
+            if all(sum(1 for x in m.walk() if x.is_reference and x.reference in channel_geos) > 1
+                   for m in members):
+                continue  # zones qui regroupent de vrais pixels (Zoom 1 / Zoom 2 du Robe iTetra2) : voulu
             group.per_mode_variants = all(modes_of) and all(
                 modes_of[i].isdisjoint(modes_of[j])
                 for i in range(len(members)) for j in range(i + 1, len(members)))

@@ -60,3 +60,27 @@ Les GDTF Robe servent d'étalon. Exemple Robin Esprite (GDTF 1.2) :
 - Connecteurs regroupés sous un « Pigtail » : seul élément à supprimer au nettoyage.
 
 À vérifier : comment MA3 présente les Axis (Yoke/Head) dans le SubfixtureOverview.
+
+### Modèle multi-instances : Robe iTetra2 (« propre » selon Jo)
+
+```
+Base                         canaux généraux
+  Head [Axis]                Tilt, Zoom, Shutter, Dimmer
+    Background               overall : Color1, RGBW, CTO, Shutter, Dimmer
+      All pixels             (sans canal : fusionné par MA3)
+        Zoom 1               Zoom de la zone 1
+          P01…P09  -> Lens Pixel   (références, Break par pixel)
+        Zoom 2               Zoom de la zone 2
+          P10…P18  -> Lens Pixel
+    P5 Flower / P14 Flower -> Lens Flower Pixel
+    Pattern
+  Pigtail, Pigtail 1         connecteurs : seuls éléments à supprimer
+Lens Pixel [Beam]            modèle unique, Dimmer virtuel + couleurs
+Lens Flower Pixel [Beam]
+```
+
+- **Un seul arbre pour les 6 modes**, un seul modèle de pixel (Lens Pixel) :
+  exactement la règle de Jo.
+- Les zones (Zoom 1 / Zoom 2) regroupent de vrais pixels références : ce ne sont
+  pas des « copies » à convertir (corrigé dans le diagnostic).
+- `ma3lib check` ne relève que les deux Pigtails.

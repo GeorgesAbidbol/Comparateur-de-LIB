@@ -102,3 +102,15 @@ def test_kind_mismatch(tmp_path):
 
 def codes_ft(ft):
     return {f.code: f for f in diagnostic.diagnose(ft)}
+
+
+def test_zones_of_pixels_are_not_instances(tmp_path):
+    """Robe iTetra2 : Zoom 1 / Zoom 2 regroupent chacun 9 pixels références, c'est voulu."""
+    from conftest import channel, fixture_xml, write_gdtf
+    zone = lambda z, a: (f'<Geometry Name="Zoom {z}">' + "".join(
+        f'<GeometryReference Name="P{a + i}" Geometry="Px"/>' for i in range(3)) + "</Geometry>")
+    geos = f'<Geometry Name="Head">{zone(1, 1)}{zone(2, 4)}</Geometry><Beam Name="Px"/>'
+    chans = channel("Zoom 1", "Zoom", 1) + channel("Zoom 2", "Zoom", 2) + channel("Px", "Dimmer", 3, "Overwrite")
+    ft = gdtf.load(write_gdtf(tmp_path / "t.gdtf", fixture_xml(
+        "Zones", geos, f'<DMXMode Name="M" Geometry="Head"><DMXChannels>{chans}</DMXChannels></DMXMode>')))
+    assert diagnostic.find_instance_groups(ft) == []
