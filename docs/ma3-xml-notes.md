@@ -74,3 +74,6 @@ Règles MA3 associées (vérifiées sur la console de Jo, 2.3.2.0) :
 - ce qui émet de la lumière est un **Beam** (simulation 3D).
 
 `ma3lib subfix <fichier> [mode]` affiche cette structure sans console.
+- **on garde toujours les Beam** de l'arbre d'un mode, même sans canal : la console
+  s'en sert pour apparier les instances. Pour copier une prog d'un fixture à un autre,
+  **types de géométrie et attributs doivent correspondre** (règle clé du comparateur).

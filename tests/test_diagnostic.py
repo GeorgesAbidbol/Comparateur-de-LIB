@@ -53,8 +53,9 @@ def test_tricky_real_world_patterns(tricky):
 def test_3d_only_geometries(tricky, good_bar, bad_bar):
     ft = gdtf.load(tricky)
     removable = {g.name for g in diagnostic.geometries_3d_only(ft)}
-    # références décoratives, leur modèle, connecteurs, lentille sans canal
-    assert removable == {"Px_1", "Px_2", "Px_3", "DMX 5Pin IN", "DMX 3Pin IN", "Px", "Lens"}
+    # références décoratives, leur modèle, connecteurs ; le Beam « Lens » reste (repère console)
+    assert removable == {"Px_1", "Px_2", "Px_3", "DMX 5Pin IN", "DMX 3Pin IN", "Px"}
+    assert "Lens" in {g.name for g in diagnostic.geometries_3d_only(ft, keep_beams=False)}
     # les enveloppes qui portent les canaux et les racines de mode restent
     assert {"Group_1", "Base", "Head Mode 1", "Lens2"} <= diagnostic.useful_geometries(ft)
     assert "geometries_3d_seulement" in codes(tricky)

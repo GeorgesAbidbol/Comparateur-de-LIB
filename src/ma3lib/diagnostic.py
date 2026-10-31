@@ -154,11 +154,21 @@ def _check_duplicate_templates(ft: FixtureType) -> list[Finding]:
     )]
 
 
-def useful_geometries(ft: FixtureType) -> set[str]:
+def useful_geometries(ft: FixtureType, keep_beams: bool = True) -> set[str]:
     """Géométries utiles au pilotage : racines de mode, géométries portant un canal,
-    leurs parents, et les références vers un modèle qui porte des canaux."""
+    leurs parents, et les références vers un modèle qui porte des canaux.
+
+    keep_beams (règle de Jo) : les Beam de l'arbre d'un mode sont toujours gardés,
+    même sans canal. La console s'en sert pour apparier les instances (copie de
+    prog d'un fixture à l'autre : types de géométrie et attributs doivent correspondre).
+    Les modèles de premier niveau référencés uniquement pour la 3D ne sont pas concernés."""
     useful: set[str] = {m.geometry for m in ft.modes}
     useful |= {ch.geometry for m in ft.modes for ch in m.channels}
+    if keep_beams:
+        for m in ft.modes:
+            root = ft.top_level(m.geometry)
+            if root is not None:
+                useful |= {g.name for g in root.walk() if g.kind == "Beam"}
     changed = True
     while changed:
         before = len(useful)
@@ -173,10 +183,10 @@ def useful_geometries(ft: FixtureType) -> set[str]:
     return useful
 
 
-def geometries_3d_only(ft: FixtureType) -> list[Geometry]:
+def geometries_3d_only(ft: FixtureType, keep_beams: bool = True) -> list[Geometry]:
     """Sous-arbres qui ne portent aucun canal dans aucun mode (pur visuel 3D).
     Ne renvoie que le sommet de chaque sous-arbre supprimable."""
-    useful = useful_geometries(ft)
+    useful = useful_geometries(ft, keep_beams)
     out: list[Geometry] = []
 
     def visit(g: Geometry) -> None:
