@@ -43,6 +43,12 @@ Attributs renommés par MA3 à l'import :
 avec leurs géométries. Un nettoyage des modes eux-mêmes sera une fonction séparée,
 plus tard, si besoin.
 
+**Quand on retravaille un mode** : on réutilise les **mêmes géométries et les mêmes
+modèles de référence** pour un même type d'instance / d'arborescence, d'un mode à
+l'autre, au lieu de recopier un arbre par mode (le JDC d'origine a un arbre
+« … Mode 5 », « … Mode 6 », « … Mode 7 » quasi identique). Le nettoyeur proposera
+de rattacher un mode retravaillé aux géométries existantes compatibles.
+
 ## Conséquences pour l'outil
 
 - Lire **les deux formats** (GDTF et XML MA3) : les sources viennent de GDTF Share,

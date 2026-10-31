@@ -276,7 +276,7 @@ def _check_instances(ft: FixtureType) -> list[Finding]:
         out.append(Finding(
             INFO, "variantes_par_mode",
             f"{len(variants)} groupe(s) de géométries dupliquées par mode DMX "
-            "(une copie de l'arbre par mode, pas des instances)",
+            "(une copie de l'arbre par mode : mutualisables quand on retravaille ces modes)",
             variants,
         ))
     return out
