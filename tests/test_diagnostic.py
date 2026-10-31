@@ -35,3 +35,15 @@ def test_broken(broken):
     assert c["reference_cassee"].level == diagnostic.ERREUR
     assert c["canal_sans_geometrie"].details == ["Ghost"]
     assert c["geometrie_orpheline"].details == ["Unused"]
+
+
+def test_tricky_real_world_patterns(tricky):
+    c = codes(tricky)
+    # enveloppes Group_N autour d'une référence décorative
+    assert "Px" in c["references_sans_canaux"].message
+    assert "instances_sans_reference" not in c
+    # Head Mode 1 / Head Mode 2 : une copie par mode, pas des instances
+    assert c["variantes_par_mode"].level == diagnostic.INFO
+    assert "instances_similaires" not in c
+    # connecteurs DMX 5Pin / 3Pin sans canaux : ignorés
+    assert not any("Pin" in d for f in c.values() for d in f.details)

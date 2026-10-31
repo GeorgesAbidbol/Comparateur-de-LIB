@@ -40,10 +40,13 @@ class InstanceGroup:
     names: list[str]
     signature: str
     same_channels: dict[str, bool] = field(default_factory=dict)  # mode -> ok
+    per_mode_variants: bool = False  # chaque membre sert à des modes différents
+    wrapped_template: str = ""  # membres = enveloppes autour d'une référence vers ce modèle
 
     @property
     def convertible(self) -> bool:
-        return bool(self.same_channels) and all(self.same_channels.values())
+        return (not self.per_mode_variants and bool(self.same_channels)
+                and all(self.same_channels.values()))
 
 
 def diagnose(ft: FixtureType) -> list[Finding]:
@@ -132,7 +135,12 @@ def _attrs_on(mode: DMXMode, names: set[str]) -> list[str]:
 
 
 def find_instance_groups(ft: FixtureType, min_size: int = 2) -> list[InstanceGroup]:
-    """Repère les géométries sœurs identiques dont le nom ne diffère que par un numéro."""
+    """Repère les géométries sœurs identiques dont le nom ne diffère que par un numéro.
+
+    Ignorés : les groupes sans aucun canal (connecteurs, câblage...).
+    Signalés à part : les variantes par mode (une copie de l'arbre par mode DMX),
+    qui ne sont pas des instances.
+    """
     groups: list[InstanceGroup] = []
     parents: list[tuple[str, list[Geometry]]] = [("(racine)", ft.geometries)]
     parents += [(g.path(), g.children) for g in ft.all_geometries() if g.children]
@@ -149,21 +157,54 @@ def find_instance_groups(ft: FixtureType, min_size: int = 2) -> list[InstanceGro
             if len(members) < min_size:
                 continue
             group = InstanceGroup(parent=parent_path, names=[m.name for m in members], signature=sig)
+            modes_of: list[set[str]] = [set() for _ in members]
             for mode in ft.modes:
                 per_instance = [_attrs_on(mode, _subtree_names(m)) for m in members]
+                for i, attrs in enumerate(per_instance):
+                    if attrs:
+                        modes_of[i].add(mode.name)
                 if any(per_instance):
                     group.same_channels[mode.name] = all(p == per_instance[0] for p in per_instance)
+            if not group.same_channels:
+                continue  # aucun canal : rien à gagner
+            group.per_mode_variants = all(modes_of) and all(
+                modes_of[i].isdisjoint(modes_of[j])
+                for i in range(len(members)) for j in range(i + 1, len(members)))
+            group.wrapped_template = _wrapped_template(members)
             groups.append(group)
     return groups
 
 
+def _wrapped_template(members: list[Geometry]) -> str:
+    """Si chaque membre contient une référence vers le même modèle, renvoie ce modèle."""
+    targets = set()
+    for m in members:
+        refs = [g.reference for g in m.walk() if g.is_reference]
+        if len(refs) != 1:
+            return ""
+        targets.add(refs[0])
+    return targets.pop() if len(targets) == 1 else ""
+
+
 def _check_instances(ft: FixtureType) -> list[Finding]:
     out: list[Finding] = []
+    variants = []
     for grp in find_instance_groups(ft):
+        if grp.per_mode_variants:
+            variants.append(f"{grp.names[0]} … {grp.names[-1]} ({len(grp.names)})")
+            continue
         detail = [f"{len(grp.names)} géométries sous {grp.parent} : {grp.names[0]} … {grp.names[-1]}"]
         detail += [f"mode « {m} » : {'canaux identiques' if ok else 'canaux différents'}"
                    for m, ok in grp.same_channels.items()]
-        if grp.convertible:
+        if grp.convertible and grp.wrapped_template:
+            out.append(Finding(
+                ALERTE, "references_sans_canaux",
+                f"{len(grp.names)} instances enveloppent une référence vers « {grp.wrapped_template} » "
+                "mais gardent chacune leurs propres canaux : la référence ne sert qu'au visuel "
+                "(convertibles en vraies références avec Breaks)",
+                detail,
+            ))
+        elif grp.convertible:
             out.append(Finding(
                 ALERTE, "instances_sans_reference",
                 f"{len(grp.names)} instances copiées au lieu d'utiliser des géométries références "
@@ -177,6 +218,13 @@ def _check_instances(ft: FixtureType) -> list[Finding]:
                 "conversion à vérifier à la main",
                 detail,
             ))
+    if variants:
+        out.append(Finding(
+            INFO, "variantes_par_mode",
+            f"{len(variants)} groupe(s) de géométries dupliquées par mode DMX "
+            "(une copie de l'arbre par mode, pas des instances)",
+            variants,
+        ))
     return out
 
 

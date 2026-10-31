@@ -72,3 +72,22 @@ def broken(tmp_path):
                       f'<DMXMode Name="M" Geometry="Body"><DMXChannels>{channel("Ghost", "Dimmer", 1)}'
                       f"</DMXChannels></DMXMode>")
     return write_gdtf(tmp_path / "Test@Broken.gdtf", xml)
+
+
+@pytest.fixture
+def tricky(tmp_path):
+    """Cas vus sur de vrais GDTF : variantes par mode, enveloppes de références, connecteurs."""
+    wraps = "".join(f'<Geometry Name="Group_{i}"><GeometryReference Name="Px_{i}" Geometry="Px"/></Geometry>'
+                    for i in range(1, 4))
+    geos = (f'<Geometry Name="Base">{wraps}'
+            '<WiringObject Name="DMX 5Pin IN"/><WiringObject Name="DMX 3Pin IN"/></Geometry>'
+            '<Beam Name="Px"/>'
+            '<Geometry Name="Head Mode 1"><Beam Name="Lens"/></Geometry>'
+            '<Geometry Name="Head Mode 2"><Beam Name="Lens2"/></Geometry>')
+    wrap_chans = "".join(channel(f"Group_{i}", a, 3 * (i - 1) + k)
+                         for i in range(1, 4) for k, a in enumerate(("ColorAdd_R", "ColorAdd_G", "ColorAdd_B"), 1))
+    modes = (f'<DMXMode Name="A" Geometry="Base"><DMXChannels>{wrap_chans}</DMXChannels></DMXMode>'
+             f'<DMXMode Name="M1" Geometry="Head Mode 1"><DMXChannels>{channel("Head Mode 1", "Dimmer", 1)}</DMXChannels></DMXMode>'
+             f'<DMXMode Name="M2" Geometry="Head Mode 2"><DMXChannels>{channel("Head Mode 2", "Dimmer", 1)}'
+             f'{channel("Lens2", "Shutter1", 2)}</DMXChannels></DMXMode>')
+    return write_gdtf(tmp_path / "Test@Tricky.gdtf", fixture_xml("Tricky", geos, modes))
