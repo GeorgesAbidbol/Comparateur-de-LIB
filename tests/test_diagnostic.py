@@ -75,3 +75,15 @@ def test_duplicate_templates(tmp_path):
     ft = gdtf.load(write_gdtf(tmp_path / "t.gdtf", fixture_xml("Dup", geos, modes)))
     assert diagnostic.duplicate_templates(ft) == [["RGB Pix Mode 1", "RGB Pix Mode 2"]]
     assert "modeles_en_double" in {f.code for f in diagnostic.diagnose(ft)}
+
+
+def test_same_mode_twin_templates_are_intentional(tmp_path):
+    """JDC Line = 2 modules JDC 500 : RGB Pix A et RGB Pix B dans le même mode, voulu."""
+    from conftest import channel, fixture_xml, write_gdtf
+    geos = ('<Geometry Name="Root"><GeometryReference Name="A1" Geometry="RGB Pix A"/>'
+            '<GeometryReference Name="B1" Geometry="RGB Pix B"/></Geometry>'
+            '<Beam Name="RGB Pix A"/><Beam Name="RGB Pix B"/>')
+    chans = channel("RGB Pix A", "ColorAdd_R", 1) + channel("RGB Pix B", "ColorAdd_R", 2)
+    ft = gdtf.load(write_gdtf(tmp_path / "t.gdtf", fixture_xml(
+        "Twin", geos, f'<DMXMode Name="M" Geometry="Root"><DMXChannels>{chans}</DMXChannels></DMXMode>')))
+    assert diagnostic.duplicate_templates(ft) == []

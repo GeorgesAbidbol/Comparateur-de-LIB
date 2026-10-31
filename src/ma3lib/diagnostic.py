@@ -63,23 +63,52 @@ def diagnose(ft: FixtureType) -> list[Finding]:
 
 def duplicate_templates(ft: FixtureType) -> list[list[str]]:
     """Modèles de référence qui décrivent le même type d'instance (même type de
-    géométrie, mêmes attributs de canaux) sous des noms différents, souvent un par mode.
-    Règle de Jo : un seul modèle (ex. « Pixel RGB ») partagé par tous les modes."""
+    géométrie, mêmes attributs de canaux) sous des noms différents, un par mode.
+    Règle de Jo : un seul modèle (ex. « Pixel RGB ») partagé par tous les modes.
+
+    Deux modèles identiques utilisés dans un même mode ne sont PAS signalés :
+    c'est voulu quand ils décrivent des modules physiques distincts
+    (JDC Line = 2 modules JDC 500 collés : « RGB Pix A » et « RGB Pix B »).
+    """
     referenced = {g.reference for g in ft.all_geometries() if g.is_reference}
     by_key: dict[tuple, list[str]] = defaultdict(list)
+    modes_of: dict[str, set[str]] = {}
     for name in sorted(referenced):
         tpl = ft.top_level(name)
         if tpl is None:
             continue
         names = _subtree_names(tpl)
-        attrs = set()
+        attrs: set[str] = set()
+        modes_of[name] = set()
         for mode in ft.modes:
-            attrs |= {lc.attribute for ch in mode.channels if ch.geometry in names
-                      for lc in ch.logical_channels}
+            here = {lc.attribute for ch in mode.channels if ch.geometry in names
+                    for lc in ch.logical_channels}
+            if here:
+                attrs |= here
+                modes_of[name].add(mode.name)
         if not attrs:
             continue  # modèle purement visuel : traité par geometries_3d_only
         by_key[(_signature(tpl), tuple(sorted(attrs)))].append(name)
-    return [names for names in by_key.values() if len(names) > 1]
+
+    groups: list[list[str]] = []
+    for names in by_key.values():
+        # composantes connexes : on relie deux modèles s'ils ne partagent aucun mode
+        todo, seen = list(names), set()
+        while todo:
+            start = todo.pop(0)
+            if start in seen:
+                continue
+            comp, stack = [], [start]
+            while stack:
+                cur = stack.pop()
+                if cur in seen:
+                    continue
+                seen.add(cur)
+                comp.append(cur)
+                stack += [o for o in names if o not in seen and modes_of[o].isdisjoint(modes_of[cur])]
+            if len(comp) > 1:
+                groups.append(sorted(comp))
+    return groups
 
 
 def _check_duplicate_templates(ft: FixtureType) -> list[Finding]:
