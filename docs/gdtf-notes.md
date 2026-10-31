@@ -41,3 +41,22 @@ Highlight absent, Master pas à Grand.
 - Dépendances de mode (`ModeMaster`, `ModeFrom`, `ModeTo`) : à préserver telles
   quelles quand on modifie un canal, elles pointent vers d'autres canaux par nom.
 - Max recommandé : 1200 sommets pour les modèles 3D de tout le fixture.
+
+## Référence de qualité : Robe Lighting (choix de Jo)
+
+Les GDTF Robe servent d'étalon. Exemple Robin Esprite (GDTF 1.2) :
+
+```
+1 (2)  Base [Geometry]            canaux généraux (Control1, vitesses, LEDFrequency…)
+  1 (1)  Yoke [Axis]              Pan
+    1 (1)  Head [Axis]            Tilt + toutes les fonctions optiques + Dimmer
+      1      Beam [Beam]          aucun canal, gardé (repère console)
+  2 (6)  Pigtail [Geometry]       connecteurs (WiringObject) : pur 3D
+```
+
+- Noms de géométries courts et en anglais : Base, Yoke, Head, Beam.
+- Canaux nommés `<Géométrie>_<Attribut>` (Yoke_Pan, Head_Tilt).
+- Un mode = une racine (Base), pas de copie d'arbre par mode.
+- Connecteurs regroupés sous un « Pigtail » : seul élément à supprimer au nettoyage.
+
+À vérifier : comment MA3 présente les Axis (Yoke/Head) dans le SubfixtureOverview.
