@@ -33,8 +33,13 @@ Attributs renommés par MA3 à l'import :
    - version Jo : `Module A` → `RGB Segment Control Overhall A` (vraie géométrie
      Beam, porte Dimmer/Strobe/CTC) → 20 références `RGB Single A 1…20`.
    Résultat dans MA3 : Module > Segment > Pixels, le maître pilote ses enfants.
-3. **Un modèle de pixel par module** (`RGB Pix Mode 5 A` et `… B`) plutôt qu'un
-   modèle commun avec des breaks.
+3. **Un modèle de pixel par section** (`RGB Pix Mode 5 A` et `… B`). Raison (notice
+   GLP, rev. 2024-06-18) : en mode 5, la section A (canaux 1–98) et la section B
+   (99–196) ont chacune exactement la disposition d'un JDC Line 500 ; le fixture peut
+   être piloté comme deux 500. La structure de Jo suit la notice : par section,
+   overall blanc (1–6) > 20 pixels blancs (19–38), overall RGB (7–13) > 20 pixels RGB
+   (39–98), fond RGBW (14–18). Le canal 104 (Control de B) est ignoré par le fixture
+   (seul le 6 compte) : Jo ne l'a pas repris.
 4. **Remappe des attributs** pour retrouver les données (StrobeRate → Shutter1).
 5. Laisse parfois des restes (arbres des modes 6/7 sans mode associé).
 
