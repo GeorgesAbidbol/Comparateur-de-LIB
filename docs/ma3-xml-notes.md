@@ -36,8 +36,12 @@ Attributs renommés par MA3 à l'import :
 3. **Un modèle de pixel par module** (`RGB Pix Mode 5 A` et `… B`) plutôt qu'un
    modèle commun avec des breaks.
 4. **Remappe des attributs** pour retrouver les données (StrobeRate → Shutter1).
-5. Laisse parfois des restes (arbres des modes 6/7 sans mode associé) :
-   le nettoyeur devra supprimer les arbres orphelins.
+5. Laisse parfois des restes (arbres des modes 6/7 sans mode associé).
+
+**Règle validée par Jo (31/10/2026)** : le nettoyeur travaille mode par mode et
+**ne supprime jamais un mode**. Les modes non retravaillés restent tels quels,
+avec leurs géométries. Un nettoyage des modes eux-mêmes sera une fonction séparée,
+plus tard, si besoin.
 
 ## Conséquences pour l'outil
 
