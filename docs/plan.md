@@ -17,6 +17,6 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
 ## Points à vérifier sur le matériel de Jo
 
 - [x] Clé USB : `<lecteur>:\grandMA3\gma3_library\fixturetypes` (confirmé par Jo).
-- [ ] onPC : `C:\ProgramData\MALightingTechnology\gma3_library\fixturetypes` ?
+- [x] onPC : `C:\ProgramData\MALightingTechnology\gma3_library\fixturetypes` (confirmé par Jo).
 - [ ] Connexion GDTF Share réelle (non testable depuis l'environnement de dev).
 - [ ] Comment MA3 2.3.2.0 affiche un dimmer virtuel ajouté dans un GDTF.
