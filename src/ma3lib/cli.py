@@ -3,6 +3,7 @@
     python -m ma3lib info  <fichier.gdtf>         contenu : modes, canaux, géométries
     python -m ma3lib check <fichier.gdtf> [...]   diagnostic géométries / dimmer
     python -m ma3lib subfix <fichier> [mode]       sous-fixtures comme le SubfixtureOverview MA3
+    python -m ma3lib charte <fichier> <charte.csv>  comparaison avec la charte DMX constructeur
     python -m ma3lib targets                      destinations MA3 détectées
     python -m ma3lib share-search <mots>          recherche sur GDTF Share
     python -m ma3lib share-get <rid> [dossier]    téléchargement depuis GDTF Share
@@ -14,7 +15,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import diagnostic, gdtf, ma3_paths, subfixtures
+from . import charte, diagnostic, gdtf, ma3_paths, subfixtures
 
 LEVEL_MARK = {diagnostic.ERREUR: "XX", diagnostic.ALERTE: "!!", diagnostic.INFO: "--"}
 
@@ -81,6 +82,37 @@ def cmd_subfix(args) -> int:
     return 0
 
 
+def cmd_charte(args) -> int:
+    ft = gdtf.load(args.file)
+    rows = charte.load_chart(args.chart)
+    chart_modes = sorted({r.mode for r in rows})
+    total_issues = 0
+    for cm in chart_modes:
+        if args.mode and args.mode.lower() not in cm.lower():
+            continue
+        mode = next((m for m in ft.modes if m.name.lower().startswith(cm.lower())), None) \
+            or next((m for m in ft.modes if cm.lower() in m.name.lower()), None)
+        if mode is None:
+            print(f"== {cm} : aucun mode correspondant dans le fixture")
+            continue
+        matches = charte.compare(ft, mode, [r for r in rows if r.mode == cm])
+        issues = [m for m in matches if m.status not in (charte.OK, charte.IGNORE)]
+        ignored = [m for m in matches if m.status == charte.IGNORE]
+        total_issues += len(issues)
+        ok = len(matches) - len(issues) - len(ignored)
+        extra = f", {len(ignored)} inutilisé(s) selon la notice" if ignored else ""
+        print(f"== {cm} (notice) <-> « {mode.name} » : {ok} canaux conformes, {len(issues)} écart(s){extra}")
+        for m in issues:
+            fn = m.chart.function if m.chart else "-"
+            got = f"{m.channel.instance} : {', '.join(m.channel.attributes)}" if m.channel else "-"
+            print(f"  [{m.status}] ch {m.address:>3}  notice « {fn} »  |  fixture {got}")
+            if m.note:
+                print(f"           {m.note}")
+            if m.suggestion:
+                print(f"           -> proposition : {m.suggestion}")
+    return 1 if total_issues else 0
+
+
 def cmd_targets(args) -> int:
     targets = ma3_paths.find_targets()
     if not targets:
@@ -117,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("subfix"); s.add_argument("file"); s.add_argument("mode", nargs="?", default="")
     s.add_argument("--max", type=int, default=3, help="enfants affichés par niveau (0 = tous)")
     s.set_defaults(func=cmd_subfix)
+    s = sub.add_parser("charte"); s.add_argument("file"); s.add_argument("chart")
+    s.add_argument("mode", nargs="?", default=""); s.set_defaults(func=cmd_charte)
     s = sub.add_parser("targets"); s.set_defaults(func=cmd_targets)
     s = sub.add_parser("share-search"); s.add_argument("words", nargs="+"); s.set_defaults(func=cmd_share_search)
     s = sub.add_parser("share-get"); s.add_argument("rid", type=int); s.add_argument("dest", nargs="?", default="gdtf")
