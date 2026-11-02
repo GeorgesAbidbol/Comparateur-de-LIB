@@ -21,11 +21,12 @@ def test_bad_bar_conforms(tmp_path, bad_bar):
 
 def test_differences_found(tmp_path, bad_bar):
     ft = gdtf.load(bad_bar)
-    rows = write_chart(tmp_path, "12ch;1;2;;Red\n12ch;3-12;;;Blue|Red|Green\n12ch;13;;;Dimmer\n12ch;14;;;Reserved\n")
+    rows = write_chart(tmp_path, "12ch;1;2;;Red\n12ch;3-12;;;Green|Red|Blue\n12ch;13;;;Dimmer\n12ch;14;;;Reserved\n")
     by_addr = {m.address: m for m in charte.compare(ft, ft.modes[0], rows)}
     assert by_addr[1].status == charte.DIFF and "16 bits" in by_addr[1].suggestion
     assert by_addr[2].status == charte.EN_TROP  # la notice en fait le Fine du canal 1
-    assert by_addr[4].status == charte.DIFF and "ColorAdd_R" in by_addr[4].suggestion
+    assert by_addr[3].status == charte.DIFF and "ColorAdd_G" in by_addr[3].suggestion
+    assert by_addr[4].status == charte.OK
     assert by_addr[13].status == charte.MANQUANT
     assert by_addr[14].status == charte.IGNORE
 
