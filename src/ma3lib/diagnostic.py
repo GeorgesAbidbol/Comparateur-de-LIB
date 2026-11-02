@@ -59,7 +59,21 @@ def diagnose(ft: FixtureType) -> list[Finding]:
     findings += _check_3d_only(ft)
     findings += _check_duplicate_templates(ft)
     findings += _check_kind_mismatch(ft)
+    findings += _check_attributes(ft)
     return findings
+
+
+def _check_attributes(ft: FixtureType) -> list[Finding]:
+    """Attributs mal rangés (feature = pool de presets MA3, ActivationGroup), voir attributs.py."""
+    from . import attributs
+    issues = attributs.check(ft)
+    bad = [i for i in issues if i.level == "alerte"]
+    out = []
+    if bad:
+        out.append(Finding(ALERTE, "attributs_mal_ranges",
+                           f"{len(bad)} attribut(s) mal rangé(s) (ma3lib attributs / remap pour corriger)",
+                           [f"{i.attribute} : {i.problem} -> {i.suggestion}" for i in bad]))
+    return out
 
 
 def _check_kind_mismatch(ft: FixtureType) -> list[Finding]:

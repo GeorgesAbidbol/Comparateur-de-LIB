@@ -299,7 +299,7 @@ def _parse_mode(el: ET.Element, is_ma3: bool = False) -> DMXMode:
 
 # Ordre des octets d'un canal MA3, du plus au moins significatif (Ultra/Uber : noms supposés,
 # aucun exemple 24/32 bits vu pour l'instant).
-MA3_BYTES = ("Coarse", "Fine", "Ultra", "Uber")
+MA3_BYTES = ("Coarse", "Fine", "Ultra", "Uber")  # Ultra confirmé par le manuel 2.3 (Parameter List)
 
 
 def _guid_from_ma3(guid: str) -> str:

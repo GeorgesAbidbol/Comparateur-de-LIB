@@ -4,6 +4,8 @@
     python -m ma3lib check <fichier.gdtf> [...]   diagnostic géométries / dimmer
     python -m ma3lib subfix <fichier> [mode]       sous-fixtures comme le SubfixtureOverview MA3
     python -m ma3lib charte <fichier> <charte.csv>  comparaison avec la charte DMX constructeur
+    python -m ma3lib attributs <fichier>           attributs mal rangés (feature, groupe, maison)
+    python -m ma3lib remap <fichier> [règles]       renomme / range les attributs, écrit une copie
     python -m ma3lib targets                      destinations MA3 détectées
     python -m ma3lib share-search <mots>          recherche sur GDTF Share
     python -m ma3lib share-get <rid> [dossier]    téléchargement depuis GDTF Share
@@ -15,7 +17,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import charte, diagnostic, gdtf, ma3_paths, subfixtures
+from . import attributs, charte, diagnostic, gdtf, ma3_paths, remap, subfixtures
 
 LEVEL_MARK = {diagnostic.ERREUR: "XX", diagnostic.ALERTE: "!!", diagnostic.INFO: "--"}
 
@@ -117,6 +119,64 @@ def _print_chart_mode(ft, mode, cm, rows) -> int:
     return len(issues)
 
 
+def cmd_attributs(args) -> int:
+    ft = gdtf.load(args.file)
+    issues = attributs.check(ft)
+    bad = [i for i in issues if i.level == "alerte"]
+    print(f"== {ft.manufacturer} - {ft.name} : {len(bad)} attribut(s) mal rangé(s)")
+    for i in sorted(issues, key=lambda i: i.level != "alerte"):
+        if i.level == "info" and not args.tout:
+            continue
+        mark = "!!" if i.level == "alerte" else "--"
+        print(f"  {mark} {i.attribute} [{i.feature or '?'}{' / ' + i.activation_group if i.activation_group else ''}]"
+              f" : {i.problem}")
+        if i.suggestion:
+            print(f"       -> proposition : {i.suggestion}")
+    if not args.tout:
+        n = len(issues) - len(bad)
+        if n:
+            print(f"  ({n} info(s) masquée(s) : attributs maison sans problème, conversions MA3 ; --tout pour voir)")
+    return 1 if bad else 0
+
+
+def _pairs(values: list[str], what: str) -> list[tuple[str, str]]:
+    out = []
+    for v in values or []:
+        if "=" not in v:
+            raise remap.RemapError(f"{what} attend « attribut=valeur », reçu « {v} »")
+        a, b = v.split("=", 1)
+        out.append((a.strip(), b.strip()))
+    return out
+
+
+def cmd_remap(args) -> int:
+    ft = gdtf.load(args.file)
+    rules: list[remap.Rule] = []
+    try:
+        if args.auto:
+            rules += remap.rules_from_issues(attributs.check(ft))
+        if args.regles:
+            rules += remap.load_rules(args.regles)
+        rules += [remap.Rule(a, rename=b) for a, b in _pairs(args.renommer, "--renommer")]
+        rules += [remap.Rule(a, feature=b) for a, b in _pairs(args.feature, "--feature")]
+        rules += [remap.Rule(a, activation_group="" if b in ("", "-") else b)
+                  for a, b in _pairs(args.groupe, "--groupe")]
+        if not rules:
+            print("Aucune règle : --auto, --regles fichier.csv, --renommer, --feature ou --groupe")
+            return 1
+        for r in rules:
+            print(f"  règle  {r.describe()}")
+        for line in remap.apply(ft, rules):
+            print(f"  fait   {line}")
+        src = Path(args.file)
+        out = Path(args.sortie) if args.sortie else src.with_name(f"{src.stem}_remap{src.suffix}")
+        print(f"Écrit : {remap.save(ft, out)}")
+    except remap.RemapError as exc:
+        print(f"Erreur : {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def cmd_targets(args) -> int:
     targets = ma3_paths.find_targets()
     if not targets:
@@ -155,6 +215,16 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(func=cmd_subfix)
     s = sub.add_parser("charte"); s.add_argument("file"); s.add_argument("chart")
     s.add_argument("mode", nargs="?", default=""); s.set_defaults(func=cmd_charte)
+    s = sub.add_parser("attributs"); s.add_argument("file")
+    s.add_argument("--tout", action="store_true", help="afficher aussi les infos")
+    s.set_defaults(func=cmd_attributs)
+    s = sub.add_parser("remap"); s.add_argument("file"); s.add_argument("regles", nargs="?", default="")
+    s.add_argument("-o", "--sortie", default="", help="fichier écrit (défaut : <nom>_remap.<ext>)")
+    s.add_argument("--auto", action="store_true", help="appliquer les propositions du détecteur")
+    s.add_argument("--renommer", action="append", metavar="ATTR=NOUVEAU")
+    s.add_argument("--feature", action="append", metavar="ATTR=Groupe.Feature")
+    s.add_argument("--groupe", action="append", metavar="ATTR=ActivationGroup", help="ATTR=- pour retirer")
+    s.set_defaults(func=cmd_remap)
     s = sub.add_parser("targets"); s.set_defaults(func=cmd_targets)
     s = sub.add_parser("share-search"); s.add_argument("words", nargs="+"); s.set_defaults(func=cmd_share_search)
     s = sub.add_parser("share-get"); s.add_argument("rid", type=int); s.add_argument("dest", nargs="?", default="gdtf")

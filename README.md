@@ -23,6 +23,11 @@ Pour l'instant, une ligne de commande. L'interface graphique arrive à l'étape 
 pip install -e .
 ma3lib info  "Fabricant@Projo.gdtf"     # modes, canaux, arbre des géométries
 ma3lib check *.gdtf                     # diagnostic géométries / références / dimmer
+ma3lib subfix fixture.xml "JO"          # sous-fixtures comme le SubfixtureOverview MA3
+ma3lib charte fixture.gdtf chartes/Ayrton_Nando_502.csv   # comparaison avec la notice DMX
+ma3lib attributs fixture.gdtf           # attributs mal rangés (feature = pool de presets MA3)
+ma3lib remap fixture.gdtf --auto        # applique les propositions, écrit fixture_remap.gdtf
+ma3lib remap fixture.xml regles.csv --renommer "Led Control=LEDZoneMode" --groupe "x=-"
 ma3lib targets                          # clés USB MA3 et dossier onPC détectés
 ma3lib share-search robe spiider        # recherche GDTF Share (compte requis)
 ma3lib share-get 12345 gdtf/            # téléchargement

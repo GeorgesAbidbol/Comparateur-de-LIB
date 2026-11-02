@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # --- Réglages ------------------------------------------------------------
-USB_LIBRARY_DIRS = ("grandMA3/gma3_library", "grandMA3_library")  # le premier est confirmé
+USB_LIBRARY_DIRS = ("grandMA3/gma3_library", "grandMA3/library", "grandMA3_library")  # le premier est confirmé par Jo ; le 2e vient de la page Export du manuel 2.3
 ONPC_LIBRARY_DIR = "gma3_library"
 FIXTURE_SUBDIR = "fixturetypes"
 # -------------------------------------------------------------------------
