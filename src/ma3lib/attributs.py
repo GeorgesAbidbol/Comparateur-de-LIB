@@ -97,6 +97,45 @@ def _ag_group(ag: str) -> str:
     return "Gobo" if _AG_WILDCARD.match(ag) else ""
 
 
+# Synonymes fabricant -> vocabulaire GDTF/MA3, pour proposer des équivalents aux attributs maison.
+SYNONYMS = {
+    "chase": {"effects"}, "pattern": {"effects"}, "fx": {"effects"}, "effect": {"effects"},
+    "macro": {"effects", "macro"}, "speed": {"rate", "speed"}, "crossfade": {"fade"},
+    "transition": {"fade"}, "size": {"adjust"}, "step": {"rate"}, "intensity": {"dimmer"},
+    "back": {"background"}, "colour": {"color"}, "strobe": {"strobe", "shutter"},
+}
+
+
+def _tokens(name: str) -> set[str]:
+    words = re.findall(r"[A-Za-z][a-z]*", re.sub(r"([a-z])([A-Z])", r"\1 \2", name))
+    out = set()
+    for w in (w.lower() for w in words):
+        if len(w) > 1:
+            out.add(w)
+            out |= SYNONYMS.get(w, set())
+    return out
+
+
+def candidates(name: str, feature: str = "", limit: int = 3) -> list[str]:
+    """Attributs standard qui pourraient remplacer un attribut maison, les plus probables d'abord.
+    Simple proposition par les mots du nom : c'est à Jo de choisir (jamais appliqué par --auto)."""
+    want = _tokens(name)
+    scored = []
+    for key, val in _table("gdtf_attributes.json").items():
+        concrete = key.replace("(n)", "1").replace("(m)", "1")
+        common = want & _tokens(concrete)
+        if not common:
+            continue
+        score = 2 * len(common) - 0.5 * len(_tokens(concrete) - want)
+        if feature and _group(val["feature"]) == _group(feature):
+            score += 1
+        if ma3_known(concrete):
+            score += 1
+        scored.append((score, ma3_name(concrete)))
+    scored.sort(key=lambda x: -x[0])
+    return [n for sc, n in scored[:limit] if sc > 1]
+
+
 @dataclass
 class AttrIssue:
     attribute: str
@@ -107,6 +146,7 @@ class AttrIssue:
     rename: str = ""  # suggestion : nouveau nom d'attribut
     new_feature: Optional[str] = None
     new_group: Optional[str] = None  # "" = retirer l'ActivationGroup
+    equivalents: tuple[str, ...] = ()  # attributs MA3/GDTF possibles pour un attribut maison
 
     @property
     def suggestion(self) -> str:
@@ -183,7 +223,10 @@ def check(ft: FixtureType) -> list[AttrIssue]:
         elif ag and agg:
             issues.append(AttrIssue(name, feature, ag,
                                     f"attribut maison dans le groupe d'usine {ag} : il s'active avec "
-                                    f"les attributs {ag} (voulu ?)", level="info"))
+                                    f"les attributs {ag}", level="info"))
         else:
             issues.append(AttrIssue(name, feature, ag, "attribut maison (hors liste GDTF)", level="info"))
+    for i in issues:
+        if gdtf_standard(i.attribute) is None and not i.rename:
+            i.equivalents = tuple(candidates(i.attribute, i.feature))
     return issues

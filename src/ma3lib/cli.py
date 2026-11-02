@@ -132,10 +132,14 @@ def cmd_attributs(args) -> int:
               f" : {i.problem}")
         if i.suggestion:
             print(f"       -> proposition : {i.suggestion}")
+        if i.equivalents:
+            eq = ", ".join(f"{e} ({(attributs.ma3_known(e) or attributs.gdtf_standard(e) or {}).get('feature', '?')})"
+                           for e in i.equivalents)
+            print(f"       équivalents MA3 possibles : {eq}")
     if not args.tout:
         n = len(issues) - len(bad)
         if n:
-            print(f"  ({n} info(s) masquée(s) : attributs maison sans problème, conversions MA3 ; --tout pour voir)")
+            print(f"  ({n} info(s) masquée(s) : attributs maison et leurs équivalents MA3, conversions ; --tout pour voir)")
     return 1 if bad else 0
 
 

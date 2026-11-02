@@ -104,3 +104,9 @@ def test_remap_ma3_xml(tmp_path):
     ft2 = gdtf.load(out)
     assert ft2.format == "ma3" and ft2.data_version == "2.3.2.0"
     assert ft2.modes[0].channels[0].attribute == "BackgroundDimmer"
+
+
+def test_equivalents_for_custom_attributes():
+    assert attributs.candidates("Chase Speed")[0] == "Effects1Rate"
+    assert attributs.candidates("color crossfade speed", "Color.Color")[0] == "ColorMixMSpeed"
+    assert "Effects1Fade" in attributs.candidates("ChaseFade")
