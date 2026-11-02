@@ -90,27 +90,31 @@ def cmd_charte(args) -> int:
     for cm in chart_modes:
         if args.mode and args.mode.lower() not in cm.lower():
             continue
-        mode = next((m for m in ft.modes if m.name.lower().startswith(cm.lower())), None) \
-            or next((m for m in ft.modes if cm.lower() in m.name.lower()), None)
-        if mode is None:
+        modes = [m for m in ft.modes if cm.lower() in m.name.lower()]
+        if not modes:
             print(f"== {cm} : aucun mode correspondant dans le fixture")
             continue
-        matches = charte.compare(ft, mode, [r for r in rows if r.mode == cm])
-        issues = [m for m in matches if m.status not in (charte.OK, charte.IGNORE)]
-        ignored = [m for m in matches if m.status == charte.IGNORE]
-        total_issues += len(issues)
-        ok = len(matches) - len(issues) - len(ignored)
-        extra = f", {len(ignored)} inutilisé(s) selon la notice" if ignored else ""
-        print(f"== {cm} (notice) <-> « {mode.name} » : {ok} canaux conformes, {len(issues)} écart(s){extra}")
-        for m in issues:
-            fn = m.chart.function if m.chart else "-"
-            got = f"{m.channel.instance} : {', '.join(m.channel.attributes)}" if m.channel else "-"
-            print(f"  [{m.status}] ch {m.address:>3}  notice « {fn} »  |  fixture {got}")
-            if m.note:
-                print(f"           {m.note}")
-            if m.suggestion:
-                print(f"           -> proposition : {m.suggestion}")
+        for mode in modes:
+            total_issues += _print_chart_mode(ft, mode, cm, [r for r in rows if r.mode == cm])
     return 1 if total_issues else 0
+
+
+def _print_chart_mode(ft, mode, cm, rows) -> int:
+    matches = charte.compare(ft, mode, rows)
+    issues = [m for m in matches if m.status not in (charte.OK, charte.IGNORE)]
+    ignored = [m for m in matches if m.status == charte.IGNORE]
+    ok = len(matches) - len(issues) - len(ignored)
+    extra = f", {len(ignored)} inutilisé(s) selon la notice" if ignored else ""
+    print(f"== {cm} (notice) <-> « {mode.name} » : {ok} canaux conformes, {len(issues)} écart(s){extra}")
+    for m in issues:
+        fn = m.chart.function if m.chart else "-"
+        got = f"{m.channel.instance} : {', '.join(m.channel.attributes)}" if m.channel else "-"
+        print(f"  [{m.status}] ch {m.address:>3}  notice « {fn} »  |  fixture {got}")
+        if m.note:
+            print(f"           {m.note}")
+        if m.suggestion:
+            print(f"           -> proposition : {m.suggestion}")
+    return len(issues)
 
 
 def cmd_targets(args) -> int:

@@ -1,0 +1,113 @@
+# Charte DMX constructeur : Ayrton NANDO 502 WASH, « NANDO_502_WASH_DMX_V104.pdf » (ayrton.eu).
+# Pixels 3 à 11 non détaillés dans la charte (points de suspension) : suite logique R,G,B,Lime.
+mode;canal;fine;section;fonction
+Basic;1;2;;Pan
+Basic;3;4;;Tilt
+Basic;5;;;Speed pan/tilt movement
+Basic;6;;;Reserved
+Basic;7;;;Reserved
+Basic;8;9;;Red LED all arrays
+Basic;10;11;;Green LED all arrays
+Basic;12;13;;Blue LED all arrays
+Basic;14;15;;Lime LED all arrays
+Basic;16;;;Shutter / Strobe
+Basic;17;18;;Dimmer intensity
+Basic;19;;;Linear CTO
+Basic;20;;;Colour preset
+Basic;21;;;Colour preset / RGBW cross fade
+Basic;22;;;Between colour preset cross fade
+Basic;23;24;;Zoom
+Basic;25;;;Reserved
+Basic;26;;;Reset, internal programs
+Standard;1;2;;Pan
+Standard;3;4;;Tilt
+Standard;5;;;Speed pan/tilt movement
+Standard;6;;;Reserved
+Standard;7;;;Reserved
+Standard;8;9;;Red LED all arrays
+Standard;10;11;;Green LED all arrays
+Standard;12;13;;Blue LED all arrays
+Standard;14;15;;Lime LED all arrays
+Standard;16;;;Shutter / Strobe
+Standard;17;18;;Dimmer intensity
+Standard;19;;;Linear CTO
+Standard;20;;;Colour preset
+Standard;21;;;Colour preset / RGBW cross fade
+Standard;22;;;Between colour preset cross fade
+Standard;23;24;;Zoom
+Standard;25;;;Reserved
+Standard;26;;;Reset, internal programs
+Standard;27;;;Main LED chase pattern
+Standard;28;;;Main LED chase speed
+Standard;29;;;Main LED chase fade
+Standard;30;;;Main LED chase size
+Standard;31;;;Red chase colour
+Standard;32;;;Green chase colour
+Standard;33;;;Blue chase colour
+Standard;34;;;Lime chase colour
+Standard;35;;;Dimmer chase intensity
+Standard;36;;;Dimmer background chase intensity
+Standard;37;;;Chase strobe
+Extended Ring;1;2;;Pan
+Extended Ring;3;4;;Tilt
+Extended Ring;5;;;Speed pan/tilt movement
+Extended Ring;6;;;Reserved
+Extended Ring;7;;;Reserved
+Extended Ring;8;9;;Red LED all arrays
+Extended Ring;10;11;;Green LED all arrays
+Extended Ring;12;13;;Blue LED all arrays
+Extended Ring;14;15;;Lime LED all arrays
+Extended Ring;16;;;Shutter / Strobe
+Extended Ring;17;18;;Dimmer intensity
+Extended Ring;19;;;Linear CTO
+Extended Ring;20;;;Colour preset
+Extended Ring;21;;;Colour preset / RGBW cross fade
+Extended Ring;22;;;Between colour preset cross fade
+Extended Ring;23;24;;Zoom
+Extended Ring;25;;;Reserved
+Extended Ring;26;;;Reset, internal programs
+Extended Ring;27;;;Main LED chase pattern
+Extended Ring;28;;;Main LED chase speed
+Extended Ring;29;;;Main LED chase fade
+Extended Ring;30;;;Main LED chase size
+Extended Ring;31;;;Red chase colour
+Extended Ring;32;;;Green chase colour
+Extended Ring;33;;;Blue chase colour
+Extended Ring;34;;;Lime chase colour
+Extended Ring;35;;;Dimmer chase intensity
+Extended Ring;36;;;Dimmer background chase intensity
+Extended Ring;37;;;Chase strobe
+Extended Ring;38;;;Cross fade to pixel/ring mode
+Extended Ring;39-42;;Ring 1;Red|Green|Blue|Lime
+Extended Ring;43-46;;Ring 2;Red|Green|Blue|Lime
+Extended Pixel;1;2;;Pan
+Extended Pixel;3;4;;Tilt
+Extended Pixel;5;;;Speed pan/tilt movement
+Extended Pixel;6;;;Reserved
+Extended Pixel;7;;;Reserved
+Extended Pixel;8;9;;Red LED all arrays
+Extended Pixel;10;11;;Green LED all arrays
+Extended Pixel;12;13;;Blue LED all arrays
+Extended Pixel;14;15;;Lime LED all arrays
+Extended Pixel;16;;;Shutter / Strobe
+Extended Pixel;17;18;;Dimmer intensity
+Extended Pixel;19;;;Linear CTO
+Extended Pixel;20;;;Colour preset
+Extended Pixel;21;;;Colour preset / RGBW cross fade
+Extended Pixel;22;;;Between colour preset cross fade
+Extended Pixel;23;24;;Zoom
+Extended Pixel;25;;;Reserved
+Extended Pixel;26;;;Reset, internal programs
+Extended Pixel;27;;;Main LED chase pattern
+Extended Pixel;28;;;Main LED chase speed
+Extended Pixel;29;;;Main LED chase fade
+Extended Pixel;30;;;Main LED chase size
+Extended Pixel;31;;;Red chase colour
+Extended Pixel;32;;;Green chase colour
+Extended Pixel;33;;;Blue chase colour
+Extended Pixel;34;;;Lime chase colour
+Extended Pixel;35;;;Dimmer chase intensity
+Extended Pixel;36;;;Dimmer background chase intensity
+Extended Pixel;37;;;Chase strobe
+Extended Pixel;38;;;Cross fade to pixel/ring mode
+Extended Pixel;39-86;;Arrays 1-12;Red|Green|Blue|Lime
