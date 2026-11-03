@@ -21,9 +21,11 @@ points, nos références restent la spec GDTF et les XML exportés par la consol
 - Les ActivationGroups d'usine vont avec les attributs d'usine. MA déconseille de les modifier,
   car cela peut empêcher de stocker toutes les valeurs attendues. Un groupe maison doit être créé
   avant d'être utilisé.
-- Le manuel ne donne **pas** la liste des 366 attributs. Elle n'est visible que dans la console :
-  Menu > Patch > Attribute Definitions, ou `List Attribute`. La table
-  `src/ma3lib/data/ma3_attributes.json` est partielle (111 attributs standard vus dans les XML de Jo).
+- Le manuel ne donne **pas** la liste des 366 attributs. Jo ne peut pas l'exporter : dans la
+  console, la liste dépend des fixtures patchés dans le show. La table
+  `src/ma3lib/data/ma3_attributes.json` est donc construite au fil de l'eau à partir des XML MA3
+  de Jo (111 attributs standard au 02/11/2026) : relancer `tools/build_attribute_tables.py` avec
+  chaque nouvel export. La liste GDTF reste la base des propositions.
 - Les numéros d'attribut changent d'un show à l'autre : il faut toujours se référer au **nom**.
 
 ## DMX channels
