@@ -17,7 +17,7 @@ Version cible : **grandMA3 2.3.2.0**.
 
 ## État : étape 1 (fondations)
 
-Pour l'instant, une ligne de commande. L'interface graphique arrive à l'étape 2.
+Une ligne de commande, et le début de l'interface graphique (étape 2, voir plus bas).
 
 ```
 pip install -e .
@@ -50,3 +50,29 @@ GDTF Share : mettre ses identifiants dans les variables d'environnement
 pip install pytest
 python -m pytest
 ```
+
+## Étape 2 : interface graphique (en cours, affichage seulement)
+
+```
+pip install -e .[gui]
+ma3lib-gui                                   # ou : python -m ma3lib.gui
+ma3lib-gui source.gdtf cible.xml             # ouvre directement deux fichiers
+```
+
+- En haut : Source et Cible (GDTF ou XML MA3, ou glisser le fichier sur la moitié voulue)
+  et leur mode. Rien d'autre.
+- Au centre : les instances en escalier, comme le SubfixtureOverview / Fixture Hero
+  de MA3 (1, 1.1, 1.1.1…). Les lignes relient chaque instance cible à son instance source,
+  proposées au chargement d'après les attributs communs. On tire une ligne pour rebrancher,
+  clic droit pour débrancher, flèche pour replier.
+- Double-clic sur une liaison : les attributs de la paire, avec pastilles et Coarse/Fine.
+  Vert = des deux côtés, orange = perdu (source) ou absent (cible), jaune = remplacé,
+  bleu = virtuel.
+- En bas : légende et nombre d'instances cible branchées.
+
+Captures : `docs/captures/`. Pas encore de sauvegarde ni d'écriture du fixture.
+
+Maquette de l'étape 3 (atelier géométries, affichage seulement) :
+`python -m ma3lib.gui.atelier fichier.gdtf [mode]`. Elle montre l'arbre complet du mode,
+les géométries 3D seules et les modèles en double, et les paramètres de la géométrie
+choisie (nom, type, modèle, adresse/Break, grille).
