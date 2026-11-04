@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFormLayout
                                QLabel, QLineEdit, QMainWindow, QPushButton, QScrollArea, QSpinBox,
                                QVBoxLayout, QWidget)
 
-from .. import diagnostic, gdtf
+from .. import compare, diagnostic, gdtf
 from ..gdtf import FixtureType, Geometry
 from . import theme
 
@@ -49,11 +49,14 @@ class GeoTree(QWidget):
         self.doubles: set[str] = set()
         self.collapsed: set[int] = set()
         self.current: Optional[Geometry] = None
+        self.idents: dict[str, str] = {}
         self._rows: list[_Row] = []
         self._hover: Optional[_Row] = None
 
-    def set_root(self, root, useless: set[str], doubles: set[str]) -> None:
+    def set_root(self, root, useless: set[str], doubles: set[str],
+                 idents: Optional[dict[str, str]] = None) -> None:
         self.root, self.useless, self.doubles = root, useless, doubles
+        self.idents = idents or {}  # nom de géométrie -> numéro de sélection MA3 (1.x.x.x)
         self.collapsed = set()
         self.current = root
         self._relayout()
@@ -108,11 +111,18 @@ class GeoTree(QWidget):
                 p.drawText(QRectF(x - 2, r.rect.top(), 14, ROW_H), Qt.AlignCenter,
                            "▸" if id(g) in self.collapsed else "▾")
             x += 16
+            # numéro de sélection MA3 : seules les géométries qui portent des canaux en ont un
+            ident = self.idents.get(g.name, "")
+            p.setFont(theme.font(9, True))
+            p.setPen(theme.ACCENT if ident and not sel else theme.TEXT)
+            p.drawText(QRectF(x, r.rect.top(), 74, ROW_H), Qt.AlignVCenter | Qt.AlignLeft, ident)
+            x += 76
             # pastille de type
             badge = BADGE.get(g.kind, g.kind[:4].upper())
             p.setFont(theme.font(7, True))
             bw = p.fontMetrics().horizontalAdvance(badge) + 12
             br = QRectF(x, r.rect.center().y() - 9, bw, 18)
+            p.setPen(Qt.NoPen)
             p.setBrush(theme.STATUS["bleu"] if g.kind == "Beam" else theme.ROW_HOVER)
             p.drawRoundedRect(br, 9, 9)
             p.setPen(theme.TEXT)
@@ -247,10 +257,10 @@ class Params(QWidget):
         self.setStyleSheet(f"QLineEdit, QSpinBox {{ background: {theme.ROW.name()}; border: none;"
                            f" border-radius: 6px; padding: 6px 10px; }}")
 
-    def show_geo(self, g: Optional[Geometry], flag_3d: bool) -> None:
+    def show_geo(self, g: Optional[Geometry], flag_3d: bool, ident: str = "") -> None:
         if g is None:
             return
-        self.title.setText(g.name)
+        self.title.setText(f"{ident}   {g.name}" if ident else g.name)
         self.name.setText(g.name)
         self.kind.setCurrentText(g.kind if g.kind in TYPES else "Geometry")
         self.model.setText(g.reference or g.model or "—")
@@ -343,7 +353,9 @@ class AtelierWindow(QMainWindow):
             return
         mode = self.ft.mode(self.modes.currentText())
         root = self.ft.top_level(mode.geometry) if mode else None
-        self.tree.set_root(root, self.useless, self.doubles)
+        inst = compare.instances(self.ft, mode) if mode else None
+        idents = {i.name: i.ident for i in compare.flatten(inst)}
+        self.tree.set_root(root, self.useless, self.doubles, idents)
         names = {g.name for g in root.walk()} if root else set()
         n3d = len(names & self.useless)
         refs = {g.reference for g in root.walk() if g.is_reference} if root else set()
@@ -354,7 +366,8 @@ class AtelierWindow(QMainWindow):
             f"   {dot(theme.STATUS['jaune'].name())} {ndbl} modèle(s) en double")
 
     def _select(self, g) -> None:
-        self.params.show_geo(g, g is not None and g.name in self.useless)
+        self.params.show_geo(g, g is not None and g.name in self.useless,
+                             self.tree.idents.get(g.name, "") if g is not None else "")
 
 
 def main(argv: list[str] | None = None) -> int:
