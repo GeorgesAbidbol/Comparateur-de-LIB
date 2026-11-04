@@ -1,0 +1,39 @@
+# Charte DMX constructeur, recopiée de la notice GLP JDC Line 1000 (rev. 2024-06-18).
+# Colonnes : mode ; canal (ou plage début-fin) ; fine ; section ; fonction (plusieurs séparées par | = cycle sur la plage)
+mode;canal;fine;section;fonction
+Mode 5;1;2;A;White overall Intensity
+Mode 5;3;;A;White overall Duration
+Mode 5;4;;A;White overall Flash rate (Shutter)
+Mode 5;5;;A;White overall Intensity effects (Strobe mode)
+Mode 5;6;;A;Control / Settings
+Mode 5;7;8;A;RGB overall Intensity
+Mode 5;9;;A;RGB overall Duration
+Mode 5;10;;A;RGB overall Flash rate (Shutter)
+Mode 5;11;;A;RGB overall Intensity effects (Strobe mode)
+Mode 5;12;;A;RGB overall CTC
+Mode 5;13;;A;RGB overall Strobe phase
+Mode 5;14;;A;Background Intensity
+Mode 5;15;;A;Background Red
+Mode 5;16;;A;Background Green
+Mode 5;17;;A;Background Blue
+Mode 5;18;;A;Background White
+Mode 5;19-38;;A;White segment Intensity
+Mode 5;39-98;;A;RGB segment Red|RGB segment Green|RGB segment Blue
+Mode 5;99;100;B;White overall Intensity
+Mode 5;101;;B;White overall Duration
+Mode 5;102;;B;White overall Flash rate (Shutter)
+Mode 5;103;;B;White overall Intensity effects (Strobe mode)
+Mode 5;104;;B;Control / Settings (ignoré par le fixture)
+Mode 5;105;106;B;RGB overall Intensity
+Mode 5;107;;B;RGB overall Duration
+Mode 5;108;;B;RGB overall Flash rate (Shutter)
+Mode 5;109;;B;RGB overall Intensity effects (Strobe mode)
+Mode 5;110;;B;RGB overall CTC
+Mode 5;111;;B;RGB overall Strobe phase
+Mode 5;112;;B;Background Intensity
+Mode 5;113;;B;Background Red
+Mode 5;114;;B;Background Green
+Mode 5;115;;B;Background Blue
+Mode 5;116;;B;Background White
+Mode 5;117-136;;B;White segment Intensity
+Mode 5;137-196;;B;RGB segment Red|RGB segment Green|RGB segment Blue

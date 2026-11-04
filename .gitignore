@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+*.egg-info/
+gdtf/
+.pytest_cache/
+# Ne jamais versionner de logiciel tiers
+*.exe
+*.msi
