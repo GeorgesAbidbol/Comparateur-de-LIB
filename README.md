@@ -71,3 +71,8 @@ ma3lib-gui source.gdtf cible.xml             # ouvre directement deux fichiers
 - En bas : légende et nombre d'instances cible branchées.
 
 Captures : `docs/captures/`. Pas encore de sauvegarde ni d'écriture du fixture.
+
+Maquette de l'étape 3 (atelier géométries, affichage seulement) :
+`python -m ma3lib.gui.atelier fichier.gdtf [mode]`. Elle montre l'arbre complet du mode,
+les géométries 3D seules et les modèles en double, et les paramètres de la géométrie
+choisie (nom, type, modèle, adresse/Break, grille).

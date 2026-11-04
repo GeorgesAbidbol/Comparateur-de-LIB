@@ -26,3 +26,17 @@ def test_window_loads_two_fixtures(bad_bar, good_bar):
     dlg = PairDialog(win.canvas.instance("source", "1.1"), win.canvas.instance("cible", "1.1"), "S", "C")
     dlg.grab()
     win.close()
+
+
+def test_atelier_shows_3d_only(tricky):
+    from PySide6.QtWidgets import QApplication
+    from ma3lib.gui.atelier import AtelierWindow
+
+    app = QApplication.instance() or QApplication([])
+    win = AtelierWindow()
+    win.load(str(tricky))
+    win.show()
+    app.processEvents()
+    assert win.tree._rows and "Nettoyage proposé" in win.summary.text()
+    win.grab()
+    win.close()
