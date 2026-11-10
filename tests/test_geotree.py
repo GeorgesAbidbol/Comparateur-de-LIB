@@ -154,3 +154,26 @@ def test_arrange_inside_model(tmp_path):
         ("1.2", "Seg", [4]), ("1.2.1", "Px1", [5]), ("1.2.2", "Px2", [6])]
     with pytest.raises(geotree.MoveError, match="même arbre"):
         geotree.move(ft, [seg], ft.geometry("Root"), 0)
+
+
+def test_edit_rename_kind_address(good_bar):
+    ft = gdtf.load(good_bar)
+    new, msg = geotree.apply_edit(ft, ft.geometry("Pixel2"), geotree.Edit(breaks=[20]))
+    assert new.geometry("Pixel2").breaks[0].dmx_offset == 20
+    # renommer le modèle : références, canaux et relations suivent
+    new, msg = geotree.apply_edit(new, new.top_level("Pixel"), geotree.Edit(name="Px", kind="Geometry"))
+    assert new.top_level("Px").kind == "Geometry"
+    assert {g.reference for g in new.geometry("Body").children} == {"Px"}
+    assert {c.geometry for c in new.modes[0].channels} == {"Body", "Px"}
+    assert all(r.follower.startswith("Px_") for r in new.modes[0].relations)
+    assert [s.coarse for s in compare.instances(new, new.modes[0]).children[1].slots] == [20, 21, 22]
+    with pytest.raises(geotree.MoveError):
+        geotree.apply_edit(new, new.geometry("Pixel1"), geotree.Edit(kind="Beam"))  # référence
+
+
+def test_edit_shift_channels_and_grid(bad_bar):
+    ft = gdtf.load(bad_bar)
+    new, _ = geotree.apply_edit(ft, ft.geometry("Pixel1"), geotree.Edit(start=("12ch", 13), grid=(0, 0)))
+    assert [c.offset for c in new.modes[0].channels if c.geometry == "Pixel1"] == [[13], [14], [15]]
+    assert geotree.element_of(new, new.geometry("Pixel1")).get("GridX") == "0"
+    assert geotree.grid_proposal(new.geometry("Pixel3")) == (2, 0)  # pas de position : dans l'ordre

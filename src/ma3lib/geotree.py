@@ -544,3 +544,157 @@ def _overlaps(ft: FixtureType, new_names: set[str]) -> str:
         if clash:
             out.append(f"{m.name} (canal {min(clash)}…)")
     return ", ".join(out[:3])
+
+
+# --------------------------------------------------------------------------
+# D. Paramètres d'une géométrie : nom, type, adresse, grille
+
+EDITABLE_KINDS = ("Geometry", "Axis", "Beam", "FilterBeam", "FilterColor", "FilterGobo",
+                  "FilterShaper", "MediaServerLayer", "MediaServerCamera", "MediaServerMaster",
+                  "Display", "Laser", "Structure", "Support", "Magnet", "Inventory", "WiringObject")
+
+
+@dataclass
+class Edit:
+    """Ce que le popup demande de changer (None = ne pas toucher)."""
+    name: Optional[str] = None
+    kind: Optional[str] = None
+    breaks: Optional[list[int]] = None  # référence : DMXOffset de chaque Break
+    start: Optional[tuple[str, int]] = None  # géométrie : (mode, premier canal voulu)
+    grid: Optional[tuple[int, int]] = None
+
+
+def _rename_links(node: ET.Element, renames: dict[str, str]) -> None:
+    from .remap import LINK_ATTRS
+    for mode_el in node.iterfind("DMXModes/DMXMode"):
+        for el in mode_el.iter():
+            for key in LINK_ATTRS:
+                v = el.get(key)
+                if v and v.split(".")[0] in renames:
+                    segs = v.split(".")
+                    segs[0] = renames[segs[0]]
+                    el.set(key, ".".join(segs))
+
+
+def first_channel(ft: FixtureType, g: Geometry, mode_name: str) -> Optional[int]:
+    mode = ft.mode(mode_name)
+    offs = [c.offset[0] for c in (mode.channels if mode else []) if c.geometry == g.name and c.offset]
+    return min(offs) if offs else None
+
+
+def apply_edit(ft: FixtureType, g: Geometry, e: Edit) -> tuple[FixtureType, str]:
+    """Applique le popup. Tout est vérifié avant d'écrire ; le fixture est relu à la fin."""
+    node = ft.xml_root.find("FixtureType")
+    el = element_of(ft, g)
+    if el is None:
+        raise MoveError(f"« {g.name} » introuvable dans l'XML")
+    done = []
+    # contrôles
+    if e.name is not None and e.name != g.name:
+        if not e.name.strip() or "." in e.name or ft.geometry(e.name) is not None:
+            raise MoveError(f"nom « {e.name} » vide, avec un point, ou déjà pris")
+    if e.kind is not None and e.kind != g.kind:
+        if g.is_reference:
+            raise MoveError("une référence prend le type de son modèle : change le type du modèle")
+        if e.kind not in EDITABLE_KINDS:
+            raise MoveError(f"type « {e.kind} » inconnu")
+    if e.breaks is not None:
+        if not g.is_reference or len(e.breaks) != len(g.breaks):
+            raise MoveError("les adresses par Break ne concernent qu'une référence")
+        if any(not 1 <= b <= 512 for b in e.breaks):
+            raise MoveError("adresse hors de 1…512")
+    shift = 0
+    if e.start is not None:
+        mode_name, start = e.start
+        cur = first_channel(ft, g, mode_name)
+        if cur is None:
+            raise MoveError(f"« {g.name} » n'a pas de canal dans « {mode_name} »")
+        shift = start - cur
+        mode = ft.mode(mode_name)
+        mine = [o for c in mode.channels if c.geometry == g.name and c.offset for o in c.offset]
+        if min(mine) + shift < 1 or max(mine) + shift > 512:
+            raise MoveError("adresses hors de 1…512")
+
+    # écriture
+    if e.kind is not None and e.kind != g.kind:
+        el.tag = e.kind
+        done.append(f"type {g.kind} → {e.kind}")
+    if e.breaks is not None:
+        for b_el, off in zip(el.iterfind("Break"), e.breaks):
+            b_el.set("DMXPatch" if b_el.get("DMXPatch") is not None else "DMXOffset", str(off))
+        done.append("adresse " + " / ".join(map(str, e.breaks)))
+    if shift:
+        for mode_el in node.iterfind("DMXModes/DMXMode"):
+            if mode_el.get("Name") != e.start[0]:
+                continue
+            for ch in mode_el.iterfind("DMXChannels/DMXChannel"):
+                if ch.get("Geometry", "").split(".")[-1] != g.name:
+                    continue
+                if ft.format == "ma3":
+                    for k in ("Coarse", "Fine", "Ultra", "Uber"):
+                        if ch.get(k):
+                            ch.set(k, str(int(ch.get(k)) + shift))
+                else:
+                    off = (ch.get("Offset") or "None").strip()
+                    if off not in ("None", ""):
+                        ch.set("Offset", ",".join(str(int(o) + shift) for o in off.split(",")))
+        done.append(f"canaux {'+' if shift > 0 else ''}{shift} dans « {e.start[0]} »")
+    if e.grid is not None:
+        el.set("GridX", str(e.grid[0]))
+        el.set("GridY", str(e.grid[1]))
+        done.append(f"grille {e.grid[0]},{e.grid[1]}")
+    if e.name is not None and e.name != g.name:
+        old, new = g.name, e.name
+        el.set("Name", new)
+        if g.parent is None:  # un modèle : ses références pointent sur lui
+            for r in node.iter("GeometryReference"):
+                if r.get("Geometry") == old:
+                    r.set("Geometry", new)
+        chan_renames = {}
+        for mode_el in node.iterfind("DMXModes/DMXMode"):
+            for ch in mode_el.iterfind("DMXChannels/DMXChannel"):
+                geo = ch.get("Geometry", "")
+                parts = geo.split(".")
+                if old in parts:
+                    lc = ch.find("LogicalChannel")
+                    attr = lc.get("Attribute", "").split(".")[-1] if lc is not None else ""
+                    if parts[-1] == old:
+                        chan_renames[f"{old}_{attr}"] = f"{new}_{attr}"
+                    ch.set("Geometry", ".".join(new if p == old else p for p in parts))
+        _rename_links(node, chan_renames)
+        for m in node.iterfind("DMXModes/DMXMode"):  # racine d'un mode
+            if m.get("Geometry") == old:
+                m.set("Geometry", new)
+        done.append(f"renommée « {new} »")
+    if not done:
+        return ft, "rien à changer"
+    return restore(ft, ET.tostring(ft.xml_root, encoding="utf-8")), f"« {e.name or g.name} » : " + ", ".join(done)
+
+
+def _translation(position: str) -> tuple[float, float, float]:
+    """Translation d'une matrice GDTF « {a,b,c,x}{d,e,f,y}{g,h,i,z}{0,0,0,1} »."""
+    import re
+    rows = re.findall(r"\{([^}]*)\}", position or "")
+    try:
+        return tuple(float(rows[i].split(",")[3]) for i in range(3))  # type: ignore[return-value]
+    except (IndexError, ValueError):
+        return (0.0, 0.0, 0.0)
+
+
+def grid_proposal(g: Geometry) -> tuple[int, int]:
+    """Place proposée dans la grille parmi ses sœurs, d'après les positions 3D du GDTF :
+    colonnes selon X, lignes selon la hauteur Z (du haut vers le bas), sinon selon Y."""
+    sibs = g.parent.children if g.parent else [g]
+    pts = [_translation(s.position) for s in sibs]
+    xs = sorted({round(p[0], 3) for p in pts})
+    zs = sorted({round(p[2], 3) for p in pts}, reverse=True)
+    ys = sorted({round(p[1], 3) for p in pts})
+    me = _translation(g.position)
+    col = xs.index(round(me[0], 3))
+    if len(zs) > 1:
+        row = zs.index(round(me[2], 3))
+    else:
+        row = ys.index(round(me[1], 3)) if len(ys) > 1 else 0
+    if len(xs) == 1 and len(sibs) > 1 and row == 0:  # tous au même endroit : dans l'ordre
+        col = next(i for i, s in enumerate(sibs) if s is g)
+    return col, row

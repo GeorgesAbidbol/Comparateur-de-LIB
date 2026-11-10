@@ -46,6 +46,7 @@ class GeoTree(QWidget):
     selected = Signal(object)
     dropped = Signal(list, object, int)  # géométries, nouveau parent, rang
     menuAsked = Signal(object)  # position globale du clic droit
+    editAsked = Signal(object)  # double-clic : popup des paramètres
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -265,6 +266,11 @@ class GeoTree(QWidget):
         self.selected.emit(r.geo)
         self.update()
 
+    def mouseDoubleClickEvent(self, e):
+        r = self._row_at(e.position())
+        if r and e.button() == Qt.LeftButton and e.position().x() >= r.rect.left() + 24:
+            self.editAsked.emit(r.geo)
+
     def _drop_at(self, pos) -> Optional[tuple[_Row, str]]:
         r = self._row_at(pos) or next((x for x in self._rows
                                         if x.rect.top() - GAP_Y <= pos.y() <= x.rect.bottom() + GAP_Y), None)
@@ -473,6 +479,104 @@ class DuplicateDialog(QDialog):
         return self.count.value(), [s.value() for s in self.steps]
 
 
+class EditDialog(QDialog):
+    """Popup du double-clic : nom, type, adresse, grille d'une géométrie."""
+
+    def __init__(self, ft: FixtureType, g: Geometry, mode: str, parent=None):
+        super().__init__(parent)
+        self.g, self.mode = g, mode
+        self.setWindowTitle(f"Paramètres de « {g.name} »")
+        self.setMinimumWidth(520)
+        form = QFormLayout(self)
+        form.setContentsMargins(18, 16, 18, 14)
+        form.setVerticalSpacing(10)
+
+        self.name = QLineEdit(g.name)
+        form.addRow("Nom", self.name)
+        self.kind = QComboBox()
+        if g.is_reference:
+            tpl = ft.top_level(g.reference)
+            self.kind.addItem(f"{tpl.kind if tpl else '?'} (type du modèle « {g.reference} »)")
+            self.kind.setEnabled(False)
+        else:
+            self.kind.addItems(list(geotree.EDITABLE_KINDS))
+            self.kind.setCurrentText(g.kind)
+        form.addRow("Type", self.kind)
+
+        # adresse : une par Break pour une référence, sinon le premier canal dans ce mode
+        self.breaks: list[QSpinBox] = []
+        self.start: Optional[QSpinBox] = None
+        self._start0 = None
+        if g.is_reference:
+            users = geotree._break_users(ft, g)
+            for i, b in enumerate(g.breaks):
+                spin = QSpinBox()
+                spin.setRange(1, 512)
+                spin.setValue(b.dmx_offset)
+                self.breaks.append(spin)
+                modes = sorted({m.split("-")[0].strip() for m, _ in users[i]}) if i < len(users) else []
+                label = "Adresse" if len(g.breaks) == 1 else f"Adresse pour {', '.join(modes) or '—'}"
+                form.addRow(label, spin)
+        else:
+            self._start0 = geotree.first_channel(ft, g, mode)
+            if self._start0 is not None:
+                self.start = QSpinBox()
+                self.start.setRange(1, 512)
+                self.start.setValue(self._start0)
+                form.addRow("Premier canal (ce mode)", self.start)
+            else:
+                lab = QLabel("pas de canal dans ce mode")
+                lab.setObjectName("dim")
+                form.addRow("Adresse", lab)
+
+        el = geotree.element_of(ft, g)
+        gx, gy = (el.get("GridX"), el.get("GridY")) if el is not None else (None, None)
+        px, py = geotree.grid_proposal(g)
+        self._grid0 = (int(gx), int(gy)) if gx is not None and gy is not None else None
+        self.gx, self.gy = QSpinBox(), QSpinBox()
+        for spin, v in ((self.gx, gx if gx is not None else px), (self.gy, gy if gy is not None else py)):
+            spin.setRange(0, 999)
+            spin.setValue(int(v))
+        propose = QPushButton("Proposer")
+        propose.setToolTip("Place proposée d'après les positions 3D du GDTF")
+        propose.clicked.connect(lambda: (self.gx.setValue(px), self.gy.setValue(py)))
+        grid = QHBoxLayout()
+        grid.addWidget(QLabel("X"))
+        grid.addWidget(self.gx, 1)
+        grid.addSpacing(10)
+        grid.addWidget(QLabel("Y"))
+        grid.addWidget(self.gy, 1)
+        grid.addSpacing(10)
+        grid.addWidget(propose)
+        form.addRow("Grille", grid)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Appliquer")
+        buttons.button(QDialogButtonBox.Cancel).setText("Annuler")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+        self.setStyleSheet(f"QLineEdit, QSpinBox {{ background: {theme.ROW.name()}; border: none;"
+                           f" border-radius: 6px; padding: 6px 10px; }}")
+
+    def edit(self) -> "geotree.Edit":
+        e = geotree.Edit()
+        if self.name.text().strip() != self.g.name:
+            e.name = self.name.text().strip()
+        if self.kind.isEnabled() and self.kind.currentText() != self.g.kind:
+            e.kind = self.kind.currentText()
+        if self.breaks:
+            vals = [s.value() for s in self.breaks]
+            if vals != [b.dmx_offset for b in self.g.breaks]:
+                e.breaks = vals
+        if self.start is not None and self.start.value() != self._start0:
+            e.start = (self.mode, self.start.value())
+        grid = (self.gx.value(), self.gy.value())
+        if grid != self._grid0:
+            e.grid = grid
+        return e
+
+
 class AtelierWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -496,6 +600,7 @@ class AtelierWindow(QMainWindow):
         self.tree.selected.connect(self._select)
         self.tree.dropped.connect(self._move)
         self.tree.menuAsked.connect(self._menu)
+        self.tree.editAsked.connect(self._edit)
         self.history: list[bytes] = []  # XML avant chaque modification (Ctrl+Z le relit)
         QShortcut(QKeySequence.Undo, self, activated=self.undo)
         scroll = QScrollArea()
@@ -649,6 +754,14 @@ class AtelierWindow(QMainWindow):
         if dlg.exec() == QDialog.Accepted:
             count, steps = dlg.values()
             if self._apply(geotree.duplicate, ref, count, steps):
+                self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
+
+    def _edit(self, g: Geometry) -> None:
+        mode = self.modes.currentText()
+        dlg = EditDialog(self.ft, g, mode, self)
+        if dlg.exec() == QDialog.Accepted:
+            edit = dlg.edit()
+            if self._apply(geotree.apply_edit, g, edit):
                 self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
 
     def _merge(self, names: list) -> None:

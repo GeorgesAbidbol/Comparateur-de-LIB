@@ -85,4 +85,6 @@ marquées « copie ×N ». **Dupliquer** une référence N fois à adresses cont
 d'après le modèle, un par jeu d'adresses comme sur l'iTetra2 ; alerte si une copie tombe sur
 des adresses déjà prises). Sous l'arbre du mode, ses **modèles** (« modèle ×N ») : ce qu'on y range vaut pour toutes
 leurs références (ex. pixels rangés sous le master une fois pour A et B). On range à
-l'intérieur d'un même arbre. GDTF seulement pour l'instant. Pas encore d'enregistrement du fichier.
+l'intérieur d'un même arbre. **Double-clic** : popup nom / type / adresse (un champ par jeu
+d'adresses d'une référence, ou premier canal dans le mode) / grille (proposée d'après la 3D).
+Regrouper, fusionner et dupliquer : GDTF seulement pour l'instant. Pas encore d'enregistrement du fichier.

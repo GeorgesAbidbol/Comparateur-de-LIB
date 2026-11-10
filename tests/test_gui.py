@@ -111,3 +111,22 @@ def test_atelier_duplicate(good_bar, monkeypatch):
     assert win.tree.idents["Pixel7"] == "1.7"
     assert "dupliquée 3 fois" in win.status.text()
     win.close()
+
+
+def test_atelier_edit_popup(good_bar):
+    from PySide6.QtWidgets import QApplication
+    from ma3lib.gui import atelier
+
+    app = QApplication.instance() or QApplication([])
+    win = atelier.AtelierWindow()
+    win.load(str(good_bar))
+    dlg = atelier.EditDialog(win.ft, win.ft.geometry("Pixel2"), "12ch", win)
+    dlg.breaks[0].setValue(30)
+    dlg.name.setText("Pixel 2")
+    e = dlg.edit()
+    assert e.breaks == [30] and e.name == "Pixel 2" and e.kind is None
+    assert win._apply(atelier.geotree.apply_edit, win.ft.geometry("Pixel2"), e)
+    win._after_change(win._last)
+    assert win.ft.geometry("Pixel 2").breaks[0].dmx_offset == 30
+    assert win.tree.idents["Pixel 2"] == "1.2"
+    win.close()
