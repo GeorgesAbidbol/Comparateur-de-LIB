@@ -618,15 +618,16 @@ class AtelierWindow(QMainWindow):
         self.status = QLabel()
         self.status.setObjectName("dim")
         self.status.setFont(theme.font(9))
-        self.clean = QPushButton("Nettoyer…")
-        self.clean.setEnabled(False)
-        self.clean.setToolTip("Arrive avec les fonctions de l'étape 3")
+        self.export_button = QPushButton("Exporter…")
+        self.export_button.setEnabled(False)
+        self.export_button.setToolTip("Enregistrer en XML MA3 2.3.2.0 (onPC, clé USB ou dossier)")
+        self.export_button.clicked.connect(self.export)
         foot = QHBoxLayout()
         foot.setContentsMargins(14, 6, 14, 6)
         foot.addWidget(self.summary)
         foot.addSpacing(24)
         foot.addWidget(self.status, 1)
-        foot.addWidget(self.clean)
+        foot.addWidget(self.export_button)
 
         central = QWidget()
         lay = QVBoxLayout(central)
@@ -656,7 +657,16 @@ class AtelierWindow(QMainWindow):
             self.modes.setCurrentText(mode)
         self.modes.setEnabled(True)
         self.modes.blockSignals(False)
+        self.export_button.setEnabled(True)
         self._mode_changed()
+
+    def export(self) -> None:
+        if not self.ft:
+            return
+        from .export import ExportDialog
+        dlg = ExportDialog(self.ft, self)
+        if dlg.exec() and dlg.written:
+            self.status.setText(f"Exporté : {dlg.written}")
 
     def _mode_changed(self) -> None:
         if not self.ft:

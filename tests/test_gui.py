@@ -130,3 +130,19 @@ def test_atelier_edit_popup(good_bar):
     assert win.ft.geometry("Pixel 2").breaks[0].dmx_offset == 30
     assert win.tree.idents["Pixel 2"] == "1.2"
     win.close()
+
+
+def test_export_dialog(good_bar, tmp_path):
+    from ma3lib.gui.export import ExportDialog
+    from ma3lib import gdtf
+    ft = gdtf.load(good_bar)
+    dlg = ExportDialog(ft, targets=[], folder=tmp_path)
+    assert dlg.file.text() == "Test@GoodBar.xml"
+    assert dlg.keep.isChecked()
+    dlg.name.setText("GoodBar JO")
+    assert dlg.renew.isChecked()  # un autre nom = un nouveau GUID
+    assert dlg.file.text() == "Test@GoodBar JO.xml"
+    dlg.note.setText("JO")
+    dlg.export()
+    assert dlg.written == tmp_path / "Test@GoodBar JO.xml"
+    assert gdtf.load(dlg.written).name == "GoodBar JO"

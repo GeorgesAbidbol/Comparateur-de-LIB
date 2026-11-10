@@ -70,7 +70,7 @@ ma3lib-gui source.gdtf cible.xml             # ouvre directement deux fichiers
   bleu = virtuel.
 - En bas : légende et nombre d'instances cible branchées.
 
-Captures : `docs/captures/`. Pas encore de sauvegarde ni d'écriture du fixture.
+Captures : `docs/captures/`.
 
 Atelier géométries (étape 3, en cours) : `python -m ma3lib.gui.atelier fichier.gdtf [mode]`.
 Arbre complet du mode avec les numéros de sélection MA3 (1.x.x.x), les géométries 3D seules
@@ -87,4 +87,17 @@ des adresses déjà prises). Sous l'arbre du mode, ses **modèles** (« modèle 
 leurs références (ex. pixels rangés sous le master une fois pour A et B). On range à
 l'intérieur d'un même arbre. **Double-clic** : popup nom / type / adresse (un champ par jeu
 d'adresses d'une référence, ou premier canal dans le mode) / grille (proposée d'après la 3D).
-Regrouper, fusionner et dupliquer : GDTF seulement pour l'instant. Pas encore d'enregistrement du fichier.
+Regrouper, fusionner et dupliquer : GDTF seulement pour l'instant.
+
+## Étape 4 : exporter pour grandMA3 2.3.2.0
+
+Bouton **Exporter…** en bas de l'atelier : nom, note (ex. « JO »), GUID (gardé, ou nouveau
+dès que le nom change), destination (onPC ou clé USB trouvées, à côté de l'original, ou un
+dossier). Fichier `fabricant@nom.xml`, au format XML MA3 2.3.2.0 comme un export « User » de
+la console : un GDTF est converti (règles dans `docs/ma3-xml-notes.md`), un XML MA3 est
+réécrit tel quel avec les modifications de l'atelier.
+
+```
+python -m ma3lib export fichier.gdtf --dossier D:\lib [--nom "…" --note JO --nouveau-guid --remplacer]
+python -m ma3lib export fichier.gdtf --onpc        # ou --cle
+```

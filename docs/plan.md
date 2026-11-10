@@ -20,6 +20,9 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
    cf. spec GDTF, listing 1).
 4. **Export et dépôt** : écriture du fixture corrigé en **XML MA3 2.3.2.0** (choix de Jo), copie sur clé USB MA3
    ou dans le dossier onPC, test d'import dans grandMA3 onPC.
+   Fait (10/11/2026) : convertisseur GDTF → XML MA3 (`ma3lib/ma3xml.py`, règles dans
+   `docs/ma3-xml-notes.md`), bouton « Exporter… » de l'atelier (nom, note, GUID, destination),
+   commande `python -m ma3lib export`. Reste : export depuis le comparateur, test onPC.
 
 5. **Créer un fixture de zéro** (idée de Jo, 10/11/2026) : à partir des données constructeur
    et de la charte DMX PDF. Claude transcrit le PDF en charte CSV (`chartes/`), l'outil
@@ -34,6 +37,8 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
 
 - [x] Clé USB : `<lecteur>:\grandMA3\gma3_library\fixturetypes` (confirmé par Jo).
 - [x] onPC : `C:\ProgramData\MALightingTechnology\gma3_library\fixturetypes` (confirmé par Jo).
+- [ ] Import onPC d'un XML converti par l'outil (iTetra2, Nando 502) : pas de conflit dans le Patch ?
+  Maillages 3D, vignette, gobos visibles ? (gobos : référence au pool seulement, comme la console.)
 - [ ] Connexion GDTF Share réelle (non testable depuis l'environnement de dev).
 - [ ] Comment MA3 2.3.2.0 affiche un dimmer virtuel ajouté dans un GDTF.
 - [x] Axis : une tête seule se fond dans l'instance principale (iTetra2) ; plusieurs têtes
