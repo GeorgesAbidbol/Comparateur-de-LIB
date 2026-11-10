@@ -28,6 +28,13 @@ Trois notions à ne pas mélanger :
   Une référence n'a pas d'enfant à elle : ce qui est « sous » elle sur la console vient
   de son modèle, et son type est celui de la racine du modèle.
 
+Un seul arbre pour plusieurs modes (méthode de l'iTetra2, la bonne selon Jo) : chaque
+référence de pixel a **deux Break**, `DMXBreak="1" DMXOffset="5"` puis `DMXBreak="1"
+DMXOffset="4"` (P02). Le mode choisit par ses canaux : en RGBW (pas de 4) les canaux du
+modèle sont en `DMXBreak="1"` → premier Break ; en RGB (pas de 3) ils sont en
+`DMXBreak="Overwrite"` → dernier Break (règle de la spec). Les adresses des pixels sont
+donc dans les références, le mode ne fait que choisir laquelle.
+
 Conséquences pour l'atelier : regrouper des géométries identiques en modèle + références,
 dupliquer une référence N fois à adresses contiguës, et pouvoir ranger (glisser-déposer)
 aussi à l'intérieur des modèles.
