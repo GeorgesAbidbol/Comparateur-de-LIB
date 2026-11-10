@@ -175,5 +175,6 @@ def test_edit_shift_channels_and_grid(bad_bar):
     ft = gdtf.load(bad_bar)
     new, _ = geotree.apply_edit(ft, ft.geometry("Pixel1"), geotree.Edit(start=("12ch", 13), grid=(0, 0)))
     assert [c.offset for c in new.modes[0].channels if c.geometry == "Pixel1"] == [[13], [14], [15]]
-    assert geotree.element_of(new, new.geometry("Pixel1")).get("GridX") == "0"
+    el = geotree.element_of(new, new.geometry("Pixel1"))
+    assert (el.get("GridAuto"), el.get("GridX"), el.get("GridZ")) == ("Manual", "0", "0")
     assert geotree.grid_proposal(new.geometry("Pixel3")) == (2, 0)  # pas de position : dans l'ordre

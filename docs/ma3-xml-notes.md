@@ -18,7 +18,7 @@ Ce n'est **pas** du GDTF, mais c'est très proche (même arbre, autres noms).
 | Canal par défaut | `InitialFunction` | `DefaultChannelFunction="Dimmer.DIMMER"` |
 | Mode | `Name`, `Geometry` | + `XYZ="No"`, `DiveInto="Yes"` |
 | Images | fichiers du zip | intégrées en Base64 (`<Block Base64=…>`, `DependencyExport`) |
-| Grille | — | `GridAuto`, `GridX/Y/Z` sur les géométries |
+| Grille | — | `GridAuto` (`Auto` ou `Manual`), `GridX/Y/Z` sur les géométries, place relative aux sœurs |
 
 Attributs renommés par MA3 à l'import :
 `ColorAdd_R/G/B/CW` → `ColorRGB_R/G/B/CW`, `ColorSub_C/M/Y` → `ColorRGB_R/G/B`.

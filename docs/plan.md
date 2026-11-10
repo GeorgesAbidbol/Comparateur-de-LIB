@@ -28,8 +28,9 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
 
 ## Points à vérifier sur le matériel de Jo
 
-- [ ] Grille MA3 : on n'a vu que `GridAuto="Auto"`. Quelle valeur MA3 écrit-elle quand on
-  place une instance à la main dans la grille (Fixture Hero) ? Il faut un export de Jo.
+- [x] Grille MA3 : placée à la main = `GridAuto="Manual"` + `GridX/GridY/GridZ`, relatifs aux
+  sœurs (Color Strike M 47ch JO, JDC JO). La proposition de l'atelier retrouve 24/25 et 41/45
+  des placements manuels de Jo.
 
 - [x] Clé USB : `<lecteur>:\grandMA3\gma3_library\fixturetypes` (confirmé par Jo).
 - [x] onPC : `C:\ProgramData\MALightingTechnology\gma3_library\fixturetypes` (confirmé par Jo).

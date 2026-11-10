@@ -531,7 +531,7 @@ class EditDialog(QDialog):
 
         el = geotree.element_of(ft, g)
         gx, gy = (el.get("GridX"), el.get("GridY")) if el is not None else (None, None)
-        px, py = geotree.grid_proposal(g)
+        px, py = geotree.grid_proposal(g, ft)
         self._grid0 = (int(gx), int(gy)) if gx is not None and gy is not None else None
         self.gx, self.gy = QSpinBox(), QSpinBox()
         for spin, v in ((self.gx, gx if gx is not None else px), (self.gy, gy if gy is not None else py)):

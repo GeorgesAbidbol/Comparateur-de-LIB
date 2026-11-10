@@ -640,8 +640,13 @@ def apply_edit(ft: FixtureType, g: Geometry, e: Edit) -> tuple[FixtureType, str]
                         ch.set("Offset", ",".join(str(int(o) + shift) for o in off.split(",")))
         done.append(f"canaux {'+' if shift > 0 else ''}{shift} dans « {e.start[0]} »")
     if e.grid is not None:
+        # comme les exports de Jo (Color Strike M 47ch JO, JDC JO) : place relative aux sœurs,
+        # GridAuto="Manual" dès qu'on la règle à la main
+        el.set("GridAuto", "Manual")
         el.set("GridX", str(e.grid[0]))
         el.set("GridY", str(e.grid[1]))
+        if el.get("GridZ") is None:
+            el.set("GridZ", "0")
         done.append(f"grille {e.grid[0]},{e.grid[1]}")
     if e.name is not None and e.name != g.name:
         old, new = g.name, e.name
@@ -681,20 +686,35 @@ def _translation(position: str) -> tuple[float, float, float]:
         return (0.0, 0.0, 0.0)
 
 
-def grid_proposal(g: Geometry) -> tuple[int, int]:
-    """Place proposée dans la grille parmi ses sœurs, d'après les positions 3D du GDTF :
-    colonnes selon X, lignes selon la hauteur Z (du haut vers le bas), sinon selon Y."""
+def _point(ft: Optional[FixtureType], g: Geometry) -> tuple[float, float, float]:
+    """Position 3D : matrice GDTF, ou PosX/PosY/PosZ d'un XML MA3 (0 si absent)."""
+    if g.position:
+        return _translation(g.position)
+    el = element_of(ft, g) if ft is not None else None
+    if el is None:
+        return (0.0, 0.0, 0.0)
+    return tuple(float(el.get(k) or 0) for k in ("PosX", "PosY", "PosZ"))  # type: ignore[return-value]
+
+
+def grid_proposal(g: Geometry, ft: Optional[FixtureType] = None) -> tuple[int, int]:
+    """Place proposée dans la grille parmi ses sœurs, d'après les positions 3D :
+    colonnes selon X croissant (comme les grilles manuelles de Jo), lignes selon la hauteur
+    Z (du haut vers le bas), sinon selon Y."""
     sibs = g.parent.children if g.parent else [g]
-    pts = [_translation(s.position) for s in sibs]
+    pts = [_point(ft, s) for s in sibs]
     xs = sorted({round(p[0], 3) for p in pts})
     zs = sorted({round(p[2], 3) for p in pts}, reverse=True)
     ys = sorted({round(p[1], 3) for p in pts})
-    me = _translation(g.position)
+    me = _point(ft, g)
+    if len({(round(p[0], 3), round(p[1], 3), round(p[2], 3)) for p in pts}) == 1 and len(sibs) > 1:
+        # tous au même endroit (pas de position 3D utile) : dans l'ordre de l'arbre ;
+        # des groupes s'empilent en lignes (Color Strike M 47ch JO : Plate ligne 0, Beam
+        # ligne 1), des pixels se suivent en colonnes
+        i = next(i for i, x in enumerate(sibs) if x is g)
+        return (0, i) if g.children else (i, 0)
     col = xs.index(round(me[0], 3))
     if len(zs) > 1:
         row = zs.index(round(me[2], 3))
     else:
         row = ys.index(round(me[1], 3)) if len(ys) > 1 else 0
-    if len(xs) == 1 and len(sibs) > 1 and row == 0:  # tous au même endroit : dans l'ordre
-        col = next(i for i, s in enumerate(sibs) if s is g)
     return col, row
