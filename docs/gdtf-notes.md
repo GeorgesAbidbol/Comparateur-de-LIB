@@ -3,6 +3,33 @@
 Sources : spec GDTF 1.2 (github.com/mvrdevelopment/spec) et aide GDTF Share
 (https://gdtf-share.com/help/), lue le 31/10/2026.
 
+## Géométrie, géométrie référence, type de géométrie (règles de Jo, 10/11/2026)
+
+Trois notions à ne pas mélanger :
+
+- **Géométrie** : un nœud de l'arbre physique du fixture (nom unique). Elle peut porter
+  des canaux ; sur la console, une géométrie qui porte des canaux devient une instance
+  (1.x.x). Les niveaux sans canal se fondent dans le parent.
+- **Type de géométrie** : la balise du nœud (`Geometry`, `Axis`, `Beam`, `FilterColor`…).
+  Il dit *ce qu'est* la pièce : `Axis` bouge (pan / tilt), `Beam` émet de la lumière
+  (simulation 3D ; tout ce qui éclaire, segments et pixels compris, doit être `Beam`),
+  `Geometry` est un simple contenant. La console s'en sert aussi pour reconnaître des
+  instances de même nature entre fixtures (copie de programmation).
+- **Géométrie référence** (`GeometryReference`) : **un exemplaire de plus d'un même type
+  d'instance**. Dès qu'un même type d'instance se répète, on décrit une seule fois le
+  modèle (géométrie de premier niveau, avec ses enfants et ses canaux en adresses
+  relatives) et on le pose N fois par des références, chacune avec son `<Break DMXOffset>`.
+  Ce n'est **pas lié au pixel** : à n'importe quel étage. Exemples de Jo :
+  masters de segment A et B du JDC Line 1000 (même type d'instance → un modèle, deux
+  références), un projecteur à 12 têtes tilt → un seul modèle de tête, 12 références,
+  2 × 20 pixels RGBW → un modèle de pixel, références à adresses contiguës.
+  Une référence n'a pas d'enfant à elle : ce qui est « sous » elle sur la console vient
+  de son modèle, et son type est celui de la racine du modèle.
+
+Conséquences pour l'atelier : regrouper des géométries identiques en modèle + références,
+dupliquer une référence N fois à adresses contiguës, et pouvoir ranger (glisser-déposer)
+aussi à l'intérieur des modèles.
+
 ## Pourquoi les multi-instances sont souvent mal faites
 
 Dans le GDTF Builder, **« Duplicate » / « Multiple Duplication » crée des copies**
