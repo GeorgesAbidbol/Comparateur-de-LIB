@@ -78,4 +78,7 @@ et les modèles en double, et les paramètres de la géométrie choisie (lecture
 l'instant). **Glisser-déposer** : lâcher sur le milieu d'une ligne = enfant, sur le haut ou
 le bas = avant / après ; Ctrl/Maj pour plusieurs ; les numéros se recalculent en direct ;
 Ctrl+Z annule. Le déplacement suit dans l'XML d'origine (et les chemins des canaux MA3).
-Pas encore d'enregistrement du fichier.
+Clic droit : **regrouper** des géométries identiques (copies) en un modèle + des références
+(même nom, même position, mêmes adresses : la console voit les mêmes instances) et
+**fusionner** les modèles en double d'un mode à l'autre. Les copies à regrouper sont
+marquées « copie ×N ». GDTF seulement pour l'instant. Pas encore d'enregistrement du fichier.

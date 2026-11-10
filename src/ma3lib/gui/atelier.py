@@ -19,8 +19,8 @@ from typing import Optional
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFormLayout, QHBoxLayout,
-                               QLabel, QLineEdit, QMainWindow, QPushButton, QScrollArea, QSpinBox,
-                               QVBoxLayout, QWidget)
+                               QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton,
+                               QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from .. import compare, diagnostic, gdtf, geotree
 from ..gdtf import FixtureType, Geometry
@@ -45,6 +45,7 @@ class _Row:
 class GeoTree(QWidget):
     selected = Signal(object)
     dropped = Signal(list, object, int)  # géométries, nouveau parent, rang
+    menuAsked = Signal(object)  # position globale du clic droit
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,9 +53,10 @@ class GeoTree(QWidget):
         self.root: Optional[Geometry] = None
         self.useless: set[str] = set()
         self.doubles: set[str] = set()
-        self.collapsed: set[int] = set()
+        self.collapsed: set[str] = set()  # noms des géométries repliées
         self.current: Optional[Geometry] = None
         self.idents: dict[str, str] = {}
+        self.copies: dict[str, int] = {}
         self._rows: list[_Row] = []
         self._hover: Optional[_Row] = None
         self.selection: list[Geometry] = []
@@ -65,18 +67,27 @@ class GeoTree(QWidget):
         self._drop: Optional[tuple[_Row, str]] = None  # (ligne visée, "avant" / "dans" / "après")
 
     def set_root(self, root, useless: set[str], doubles: set[str],
-                 idents: Optional[dict[str, str]] = None) -> None:
+                 idents: Optional[dict[str, str]] = None, copies: Optional[dict[str, int]] = None) -> None:
         self.root, self.useless, self.doubles = root, useless, doubles
         self.idents = idents or {}  # nom de géométrie -> numéro de sélection MA3 (1.x.x.x)
+        self.copies = copies or {}  # nom -> taille du groupe de copies identiques
         self.collapsed = set()
         self.current = root
         self.selection = [root] if root else []
         self._relayout()
         self.selected.emit(root)
 
-    def refresh(self, useless: set[str], doubles: set[str], idents: dict[str, str]) -> None:
-        """Après un déplacement : mêmes lignes repliées, même sélection."""
-        self.useless, self.doubles, self.idents = useless, doubles, idents
+    def refresh(self, root, useless: set[str], doubles: set[str], idents: dict[str, str],
+                copies: Optional[dict[str, int]] = None) -> None:
+        """Après une modification (le fixture a pu être relu) : mêmes lignes repliées,
+        même sélection, retrouvées par leur nom."""
+        names = [g.name for g in self.selection]
+        cur = self.current.name if self.current else ""
+        self.root, self.useless, self.doubles, self.idents = root, useless, doubles, idents
+        self.copies = copies or {}
+        by_name = {g.name: g for g in root.walk()} if root else {}
+        self.selection = [by_name[n] for n in names if n in by_name]
+        self.current = by_name.get(cur) or (self.selection[0] if self.selection else root)
         self._relayout()
 
     def _relayout(self) -> None:
@@ -89,6 +100,8 @@ class GeoTree(QWidget):
             nonlocal y
             flag = "3d" if g.name in self.useless else ("double" if g.reference in self.doubles
                                                          or g.name in self.doubles else "")
+            if not flag and g.name in self.copies:
+                flag = "copie"
             if flag == "double":
                 key = g.reference or g.name
                 flag = "double-vu" if key in seen else "double"
@@ -96,7 +109,7 @@ class GeoTree(QWidget):
             ind = depth * INDENT
             self._rows.append(_Row(g, depth, QRectF(MARGIN + ind, y, w - ind, ROW_H), flag))
             y += ROW_H + GAP_Y
-            if id(g) not in self.collapsed:
+            if g.name not in self.collapsed:
                 for c in g.children:
                     add(c, depth + 1)
 
@@ -126,7 +139,7 @@ class GeoTree(QWidget):
                 p.setPen(theme.TEXT)
                 p.setFont(theme.font(9, True))
                 p.drawText(QRectF(x - 2, r.rect.top(), 14, ROW_H), Qt.AlignCenter,
-                           "▸" if id(g) in self.collapsed else "▾")
+                           "▸" if g.name in self.collapsed else "▾")
             x += 16
             # numéro de sélection MA3 : seules les géométries qui portent des canaux en ont un
             ident = self.idents.get(g.name, "")
@@ -150,7 +163,7 @@ class GeoTree(QWidget):
             p.setFont(theme.font(10, r.depth == 0))
             p.setPen(theme.TEXT_DIM if dim else theme.TEXT)
             name = g.name + (f"  → {g.reference}" if g.is_reference else "")
-            if g.children and id(g) in self.collapsed:
+            if g.children and g.name in self.collapsed:
                 name += f"   ({len(g.children)})"
             right = r.rect.right() - 12
             p.drawText(QRectF(x, r.rect.top(), right - x - 220, ROW_H), Qt.AlignVCenter | Qt.AlignLeft,
@@ -159,7 +172,9 @@ class GeoTree(QWidget):
             p.setFont(theme.font(9))
             info = f"@ {g.breaks[0].dmx_offset}" if g.breaks else ""
             tag, color = {"3d": ("3D seul", theme.TEXT_DIM), "double": ("modèle en double", theme.STATUS["jaune"]),
-                          "double-vu": ("●", theme.STATUS["jaune"])}.get(r.flag, ("", theme.TEXT_DIM))
+                          "double-vu": ("●", theme.STATUS["jaune"]),
+                          "copie": (f"copie ×{self.copies.get(g.name, 0)}", theme.STATUS["orange"])}\
+                .get(r.flag, ("", theme.TEXT_DIM))
             p.setPen(theme.TEXT_DIM)
             p.drawText(QRectF(right - 60, r.rect.top(), 60, ROW_H), Qt.AlignVCenter | Qt.AlignRight, info)
             p.setPen(color)
@@ -188,10 +203,18 @@ class GeoTree(QWidget):
 
     def mousePressEvent(self, e):
         r = self._row_at(e.position())
+        if r and e.button() == Qt.RightButton:
+            if not any(r.geo is x for x in self.selection):
+                self.selection = [r.geo]
+                self.current = r.geo
+                self.selected.emit(r.geo)
+            self.update()
+            self.menuAsked.emit(e.globalPosition().toPoint())
+            return
         if not r or e.button() != Qt.LeftButton:
             return
         if r.geo.children and e.position().x() < r.rect.left() + 24:
-            self.collapsed.symmetric_difference_update({id(r.geo)})
+            self.collapsed.symmetric_difference_update({r.geo.name})
             self._relayout()
             return
         mods = e.modifiers()
@@ -261,7 +284,7 @@ class GeoTree(QWidget):
             vis = self._visible()  # garder l'ordre affiché quand on en déplace plusieurs
             geos = sorted(self.selection, key=lambda g: _index(vis, g))
             if zone == "dans":
-                self.collapsed.discard(id(row.geo))
+                self.collapsed.discard(row.geo.name)
             self.dropped.emit(geos, parent, index)
         elif self._press_row is not None and not (e.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
             self.selection = [self._press_row.geo]
@@ -408,7 +431,8 @@ class AtelierWindow(QMainWindow):
         self.tree = GeoTree()
         self.tree.selected.connect(self._select)
         self.tree.dropped.connect(self._move)
-        self.history: list[geotree.Undo] = []
+        self.tree.menuAsked.connect(self._menu)
+        self.history: list[bytes] = []  # XML avant chaque modification (Ctrl+Z le relit)
         QShortcut(QKeySequence.Undo, self, activated=self.undo)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -470,12 +494,14 @@ class AtelierWindow(QMainWindow):
             return
         mode = self.ft.mode(self.modes.currentText())
         root = self.ft.top_level(mode.geometry) if mode else None
-        self.tree.set_root(root, self.useless, self.doubles, self._idents())
+        self.tree.set_root(root, self.useless, self.doubles, self._idents(), self.copies)
         self._summary()
 
     def _diagnose(self) -> None:
         self.useless = {g.name for g in diagnostic.geometries_3d_only(self.ft)}
         self.doubles = {n for grp in diagnostic.duplicate_templates(self.ft) for n in grp}
+        self.copies = {n: len(g.names) for g in diagnostic.find_instance_groups(self.ft)
+                       if not g.per_mode_variants for n in g.names}
 
     def _idents(self) -> dict[str, str]:
         mode = self.ft.mode(self.modes.currentText()) if self.ft else None
@@ -484,26 +510,69 @@ class AtelierWindow(QMainWindow):
 
     def _after_change(self, message: str) -> None:
         self._diagnose()
-        self.tree.refresh(self.useless, self.doubles, self._idents())
+        mode = self.ft.mode(self.modes.currentText())
+        root = self.ft.top_level(mode.geometry) if mode else None
+        self.tree.refresh(root, self.useless, self.doubles, self._idents(), self.copies)
         self._summary()
         if self.tree.current is not None:
             self._select(self.tree.current)
         self.status.setText(message)
         self.setWindowTitle("Comparateur de LIB · Atelier géométries" + (" •" if self.history else ""))
 
-    def _move(self, geos: list, parent: Geometry, index: int) -> None:
+    def _apply(self, action, *args) -> bool:
+        """Lance une opération de geotree, garde de quoi annuler, affiche le résultat."""
+        before = geotree.snapshot(self.ft)
         try:
-            self.history.append(geotree.move(self.ft, geos, parent, index))
+            result = action(self.ft, *args)
         except geotree.MoveError as exc:
-            self.status.setText(str(exc))
-            return
-        what = f"{len(geos)} géométries" if len(geos) > 1 else f"« {geos[0].name} »"
-        self._after_change(f"{what} → sous « {parent.name} »   ·   Ctrl+Z pour annuler")
+            self.status.setText(f"Impossible : {exc}")
+            return False
+        if isinstance(result, tuple):  # opérations qui relisent le fixture
+            self.ft, message = result
+        else:
+            message = ""
+        self.history.append(before)
+        self._last = message
+        return True
+
+    def _move(self, geos: list, parent: Geometry, index: int) -> None:
+        if self._apply(geotree.move, geos, parent, index):
+            what = f"{len(geos)} géométries" if len(geos) > 1 else f"« {geos[0].name} »"
+            self._after_change(f"{what} → sous « {parent.name} »   ·   Ctrl+Z pour annuler")
+
+    def _menu(self, where) -> None:
+        sel = list(self.tree.selection)
+        menu = QMenu(self)
+        if len(sel) >= 2 and all(g.parent is not None and not g.is_reference for g in sel):
+            menu.addAction(f"Regrouper en modèle + {len(sel)} références…", lambda: self._group(sel))
+        elif len(sel) == 1 and sel[0].name in self.copies:
+            same = next(gr for gr in diagnostic.find_instance_groups(self.ft) if sel[0].name in gr.names)
+            geos = [self.ft.geometry(n) for n in same.names]
+            menu.addAction(f"Regrouper les {len(geos)} copies en modèle + références…",
+                           lambda: self._group(geos))
+        refs = {g.reference for g in sel if g.is_reference}
+        for grp in diagnostic.duplicate_templates(self.ft):
+            if refs & set(grp):
+                menu.addAction(f"Fusionner les {len(grp)} modèles en double (« {grp[0]} »)",
+                               lambda grp=grp: self._merge(grp))
+        if menu.isEmpty():
+            menu.addAction("Sélectionne au moins deux géométries identiques").setEnabled(False)
+        menu.exec(where)
+
+    def _group(self, geos: list) -> None:
+        name, ok = QInputDialog.getText(self, "Regrouper", "Nom du modèle :",
+                                        text=geotree.suggested_model_name(self.ft, geos))
+        if ok and self._apply(geotree.group, geos, name.strip()):
+            self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
+
+    def _merge(self, names: list) -> None:
+        if self._apply(geotree.merge_models, [self.ft.top_level(n) for n in names]):
+            self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
 
     def undo(self) -> None:
         if self.ft and self.history:
-            geotree.undo(self.ft, self.history.pop())
-            self._after_change("Déplacement annulé")
+            self.ft = geotree.restore(self.ft, self.history.pop())
+            self._after_change("Annulé")
 
     def _summary(self) -> None:
         mode = self.ft.mode(self.modes.currentText())

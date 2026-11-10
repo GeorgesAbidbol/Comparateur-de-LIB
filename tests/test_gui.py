@@ -75,3 +75,23 @@ def test_atelier_drag_drop(tmp_path):
     assert win.ft.geometry("Seg").children == []
     assert tree.idents["Px 3"] == "1.4"
     win.close()
+
+
+def test_atelier_group_and_undo(bad_bar, monkeypatch):
+    from PySide6.QtWidgets import QApplication, QInputDialog
+    from ma3lib.gui.atelier import AtelierWindow
+
+    app = QApplication.instance() or QApplication([])
+    win = AtelierWindow()
+    win.load(str(bad_bar))
+    win.show()
+    app.processEvents()
+    assert win.tree.copies == {f"Pixel{i}": 4 for i in range(1, 5)}
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Pixel", True))
+    win._group([win.ft.geometry(f"Pixel{i}") for i in range(1, 5)])
+    assert win.ft.top_level("Pixel") is not None
+    assert "4 références" in win.status.text()
+    assert win.tree.idents["Pixel3"] == "1.3"
+    win.undo()
+    assert win.ft.top_level("Pixel") is None and win.ft.geometry("Pixel3").kind == "Beam"
+    win.close()

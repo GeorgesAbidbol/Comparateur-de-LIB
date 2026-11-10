@@ -65,3 +65,35 @@ def test_ma3_paths_follow(tmp_path):
     geotree.move(ft, [ft.geometry("Plate")], ft.geometry("Other"), 0)
     assert ft.xml_root.find(".//DMXChannel").get("Geometry") == "Base.Other.Plate.Px"
     assert ft.modes[0].channels[0].geometry_path == "Base.Other.Plate.Px"
+
+
+def _addresses(ft):
+    return [(i.ident, i.name, [(s.attribute, s.addresses) for s in i.slots])
+            for i in compare.flatten(compare.instances(ft, ft.modes[0]))]
+
+
+def test_group_copies_into_model_and_references(bad_bar):
+    """Barre aux 4 pixels copiés -> 1 modèle + 4 références, mêmes instances, mêmes adresses."""
+    ft = gdtf.load(bad_bar)
+    before = _addresses(ft)
+    pixels = list(ft.geometry("Body").children)
+    assert geotree.suggested_model_name(ft, pixels) == "Pixel"
+    new, msg = geotree.group(ft, pixels, "Pixel")
+    assert "4 références" in msg
+    assert _addresses(new) == before
+    assert [g.kind for g in new.geometry("Body").children] == ["GeometryReference"] * 4
+    model = new.top_level("Pixel")
+    assert model is not None and model.kind == "Beam"
+    assert [b.dmx_offset for g in new.geometry("Body").children for b in g.breaks] == [1, 4, 7, 10]
+    chans = new.modes[0].channels
+    assert [(c.geometry, c.offset) for c in chans] == [("Pixel", [1]), ("Pixel", [2]), ("Pixel", [3])]
+
+
+def test_group_refuses_different_channels(tmp_path):
+    from conftest import channel, fixture_xml, write_gdtf
+    geos = '<Geometry Name="Body"><Beam Name="P1"/><Beam Name="P2"/></Geometry>'
+    chans = channel("P1", "Dimmer", 1) + channel("P2", "Shutter1", 2)
+    ft = gdtf.load(write_gdtf(tmp_path / "d.gdtf", fixture_xml(
+        "D", geos, f'<DMXMode Name="M" Geometry="Body"><DMXChannels>{chans}</DMXChannels></DMXMode>')))
+    with pytest.raises(geotree.MoveError, match="mêmes canaux"):
+        geotree.group(ft, list(ft.geometry("Body").children), "P")
