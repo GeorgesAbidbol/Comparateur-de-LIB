@@ -37,7 +37,7 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
 
 - [x] Clé USB : `<lecteur>:\grandMA3\gma3_library\fixturetypes` (confirmé par Jo).
 - [x] onPC : `C:\ProgramData\MALightingTechnology\gma3_library\fixturetypes` (confirmé par Jo).
-- [ ] Import onPC d'un XML converti par l'outil (iTetra2, Nando 502) : pas de conflit dans le Patch ?
+- [ ] Import onPC d'un XML converti par l'outil : Nando 502 OK (Jo, 10/11/2026), iTetra2 à confirmer.
   Maillages 3D, vignette, gobos visibles ? (gobos : référence au pool seulement, comme la console.)
 - [ ] Connexion GDTF Share réelle (non testable depuis l'environnement de dev).
 - [ ] Comment MA3 2.3.2.0 affiche un dimmer virtuel ajouté dans un GDTF.
