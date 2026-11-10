@@ -423,3 +423,113 @@ def merge_models(ft: FixtureType, models: list[Geometry]) -> tuple[FixtureType, 
         geos_el.remove(element_of(ft, m))
     msg = f"{len(models)} modèles fusionnés en « {models[0].name} »"
     return restore(ft, ET.tostring(ft.xml_root, encoding="utf-8")), msg
+
+
+# --------------------------------------------------------------------------
+# B. Dupliquer une référence N fois, à adresses contiguës
+
+def _break_users(ft: FixtureType, ref: Geometry) -> list[list[tuple[str, list[int]]]]:
+    """Pour chaque Break de la référence : les canaux du modèle qui le prennent, par mode
+    (règle de la spec : DMXBreak = n -> le Break n ; « Overwrite » -> le dernier)."""
+    tpl = ft.top_level(ref.reference)
+    names = {x.name for x in tpl.walk()} if tpl else set()
+    users: list[list[tuple[str, list[int]]]] = [[] for _ in ref.breaks]
+    if not ref.breaks:
+        return users
+    mode_has_ref = {m.name for m in ft.modes
+                    if (root := ft.top_level(m.geometry)) and any(x is ref for x in root.walk())}
+    for m in ft.modes:
+        if m.name not in mode_has_ref:
+            continue
+        for c in m.channels:
+            if c.geometry not in names or not c.offset:
+                continue
+            if c.dmx_break == "Overwrite":
+                j = len(ref.breaks) - 1
+            else:
+                brk = int(c.dmx_break) if str(c.dmx_break).isdigit() else 1
+                j = next((i for i, b in enumerate(ref.breaks) if b.dmx_break == brk), 0)
+            users[j].append((m.name, c.offset))
+    return users
+
+
+def duplicate_steps(ft: FixtureType, ref: Geometry) -> list[int]:
+    """Pas proposé pour chaque Break : la place que prend le modèle (4 en RGBW, 3 en RGB)."""
+    out = []
+    for users in _break_users(ft, ref):
+        by_mode: dict[str, list[int]] = {}
+        for mode, offs in users:
+            by_mode.setdefault(mode, []).extend(offs)
+        # étendue des adresses du modèle dans chaque mode (les offsets du modèle ne
+        # commencent pas forcément à 1 : 57…60 sur l'iTetra2 -> pas de 4)
+        out.append(max((max(v) - min(v) + 1 for v in by_mode.values()), default=1))
+    return out
+
+
+def _next_names(ft: FixtureType, name: str, n: int) -> list[str]:
+    import re
+    m = re.search(r"(\d+)(\D*)$", name)
+    taken = {g.name for g in ft.all_geometries()}
+    out, k = [], 1
+    while len(out) < n:
+        if m:
+            num = int(m.group(1)) + k
+            cand = f"{name[:m.start(1)]}{num:0{len(m.group(1))}d}{m.group(2)}"
+        else:
+            cand = f"{name} {k + 1}"
+        if cand not in taken:
+            out.append(cand)
+            taken.add(cand)
+        k += 1
+    return out
+
+
+def duplicate(ft: FixtureType, ref: Geometry, count: int,
+              steps: Optional[list[int]] = None) -> tuple[FixtureType, str]:
+    """Ajoute `count` copies de la référence juste après elle, chacune décalée du pas
+    (un pas par Break). Les canaux du modèle s'appliquent tout seuls aux nouvelles références."""
+    import copy
+    if not ref.is_reference:
+        raise MoveError(f"« {ref.name} » n'est pas une référence : regroupe d'abord en modèle + références")
+    if ref.parent is None:
+        raise MoveError("une référence de premier niveau ne se duplique pas")
+    if count < 1:
+        raise MoveError("nombre de copies : au moins 1")
+    steps = steps or duplicate_steps(ft, ref)
+    if len(steps) != len(ref.breaks):
+        raise MoveError("il faut un pas par Break de la référence")
+    el = element_of(ft, ref)
+    parent_el = element_of(ft, ref.parent)
+    pos = list(parent_el).index(el)
+    names = _next_names(ft, ref.name, count)
+    for k, name in enumerate(names, 1):
+        new = copy.deepcopy(el)
+        new.set("Name", name)
+        for b_el, step in zip(new.iterfind("Break"), steps):
+            off = int(b_el.get("DMXOffset") or b_el.get("DMXPatch") or 1) + k * step
+            b_el.set("DMXPatch" if b_el.get("DMXPatch") is not None else "DMXOffset", str(off))
+        parent_el.insert(pos + k, new)
+    new_ft = restore(ft, ET.tostring(ft.xml_root, encoding="utf-8"))
+    msg = f"« {ref.name} » dupliquée {count} fois ({names[0]} … {names[-1]}, pas {'/'.join(map(str, steps))})"
+    clash = _overlaps(new_ft, set(names))
+    if clash:
+        msg += f" — attention, adresses déjà prises : {clash}"
+    return new_ft, msg
+
+
+def _overlaps(ft: FixtureType, new_names: set[str]) -> str:
+    """Modes où les nouvelles instances tombent sur des adresses déjà utilisées."""
+    from .compare import flatten, instances
+    out = []
+    for m in ft.modes:
+        used: dict[int, str] = {}
+        clash = set()
+        for inst in flatten(instances(ft, m)):
+            for s in inst.slots:
+                for a in s.addresses:
+                    if a in used and (inst.name in new_names) != (used[a] in new_names):
+                        clash.add(a)
+                    used.setdefault(a, inst.name)
+        if clash:
+            out.append(f"{m.name} (canal {min(clash)}…)")
+    return ", ".join(out[:3])

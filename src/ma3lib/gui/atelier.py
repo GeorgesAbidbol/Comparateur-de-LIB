@@ -18,8 +18,8 @@ from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
-from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFormLayout, QHBoxLayout,
-                               QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton,
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+                               QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton,
                                QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from .. import compare, diagnostic, gdtf, geotree
@@ -409,6 +409,42 @@ class Params(QWidget):
                           "la retirera." if flag_3d else "")
 
 
+class DuplicateDialog(QDialog):
+    """Combien de copies, et de combien d'adresses décaler chacune (un pas par Break)."""
+
+    def __init__(self, ref: Geometry, steps: list[int], parent=None, users=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Dupliquer « {ref.name} »")
+        self.count = QSpinBox()
+        self.count.setRange(1, 512)
+        self.count.setValue(1)
+        self.steps = []
+        form = QFormLayout(self)
+        form.setContentsMargins(18, 16, 18, 14)
+        form.setVerticalSpacing(10)
+        form.addRow("Copies en plus", self.count)
+        for i, (b, step) in enumerate(zip(ref.breaks, steps)):
+            spin = QSpinBox()
+            spin.setRange(0, 512)
+            spin.setValue(step)
+            self.steps.append(spin)
+            modes = sorted({m.split("-")[0].strip() for m, _ in users[i]}) if users else []
+            label = "Pas d'adresse" if len(steps) == 1 else \
+                f"Pas pour {', '.join(modes) or 'aucun mode'} (départ {b.dmx_offset})"
+            form.addRow(label, spin)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Dupliquer")
+        buttons.button(QDialogButtonBox.Cancel).setText("Annuler")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+        self.setStyleSheet(f"QSpinBox {{ background: {theme.ROW.name()}; border: none;"
+                           f" border-radius: 6px; padding: 6px 10px; }}")
+
+    def values(self) -> tuple[int, list[int]]:
+        return self.count.value(), [s.value() for s in self.steps]
+
+
 class AtelierWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -550,6 +586,8 @@ class AtelierWindow(QMainWindow):
             geos = [self.ft.geometry(n) for n in same.names]
             menu.addAction(f"Regrouper les {len(geos)} copies en modèle + références…",
                            lambda: self._group(geos))
+        if len(sel) == 1 and sel[0].is_reference and sel[0].parent is not None:
+            menu.addAction(f"Dupliquer « {sel[0].name} »…", lambda: self._duplicate(sel[0]))
         refs = {g.reference for g in sel if g.is_reference}
         for grp in diagnostic.duplicate_templates(self.ft):
             if refs & set(grp):
@@ -564,6 +602,14 @@ class AtelierWindow(QMainWindow):
                                         text=geotree.suggested_model_name(self.ft, geos))
         if ok and self._apply(geotree.group, geos, name.strip()):
             self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
+
+    def _duplicate(self, ref: Geometry) -> None:
+        dlg = DuplicateDialog(ref, geotree.duplicate_steps(self.ft, ref), self,
+                              geotree._break_users(self.ft, ref))
+        if dlg.exec() == QDialog.Accepted:
+            count, steps = dlg.values()
+            if self._apply(geotree.duplicate, ref, count, steps):
+                self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
 
     def _merge(self, names: list) -> None:
         if self._apply(geotree.merge_models, [self.ft.top_level(n) for n in names]):

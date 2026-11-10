@@ -95,3 +95,19 @@ def test_atelier_group_and_undo(bad_bar, monkeypatch):
     win.undo()
     assert win.ft.top_level("Pixel") is None and win.ft.geometry("Pixel3").kind == "Beam"
     win.close()
+
+
+def test_atelier_duplicate(good_bar, monkeypatch):
+    from PySide6.QtWidgets import QApplication, QDialog
+    from ma3lib.gui import atelier
+
+    app = QApplication.instance() or QApplication([])
+    win = atelier.AtelierWindow()
+    win.load(str(good_bar))
+    win.show()
+    monkeypatch.setattr(atelier.DuplicateDialog, "exec", lambda self: QDialog.Accepted)
+    monkeypatch.setattr(atelier.DuplicateDialog, "values", lambda self: (3, [3]))
+    win._duplicate(win.ft.geometry("Pixel4"))
+    assert win.tree.idents["Pixel7"] == "1.7"
+    assert "dupliquée 3 fois" in win.status.text()
+    win.close()

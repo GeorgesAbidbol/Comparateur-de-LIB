@@ -97,3 +97,36 @@ def test_group_refuses_different_channels(tmp_path):
         "D", geos, f'<DMXMode Name="M" Geometry="Body"><DMXChannels>{chans}</DMXChannels></DMXMode>')))
     with pytest.raises(geotree.MoveError, match="mêmes canaux"):
         geotree.group(ft, list(ft.geometry("Body").children), "P")
+
+
+def test_duplicate_reference(good_bar):
+    """GoodBar : 4 pixels RGB en références (pas de 3) -> 2 de plus à 13 et 16."""
+    ft = gdtf.load(good_bar)
+    p4 = ft.geometry("Pixel4")
+    assert geotree.duplicate_steps(ft, p4) == [3]
+    new, msg = geotree.duplicate(ft, p4, 2)
+    body = new.geometry("Body")
+    assert [g.name for g in body.children] == [f"Pixel{i}" for i in range(1, 7)]
+    assert [g.breaks[0].dmx_offset for g in body.children] == [1, 4, 7, 10, 13, 16]
+    inst = compare.instances(new, new.modes[0])
+    assert [s.coarse for s in inst.children[5].slots] == [16, 17, 18]
+    assert "attention" not in msg
+    new2, msg2 = geotree.duplicate(new, new.geometry("Pixel2"), 1)  # tombe sur Pixel3
+    assert "attention" in msg2
+
+
+def test_duplicate_two_breaks_like_itetra(tmp_path):
+    """Deux Break (RGBW pas 4 en DMXBreak=1, RGB pas 3 en Overwrite) : chacun garde son pas."""
+    from conftest import channel, fixture_xml, write_gdtf
+    ref = ('<GeometryReference Name="P01" Geometry="Px"><Break DMXOffset="1" DMXBreak="1"/>'
+           '<Break DMXOffset="1" DMXBreak="1"/></GeometryReference>')
+    geos = f'<Geometry Name="Body">{ref}</Geometry><Beam Name="Px"/>'
+    rgbw = "".join(channel("Px", a, k, "1") for k, a in enumerate(("ColorAdd_R", "ColorAdd_G", "ColorAdd_B", "Dimmer"), 1))
+    rgb = "".join(channel("Px", a, k, "Overwrite") for k, a in enumerate(("ColorAdd_R", "ColorAdd_G", "ColorAdd_B"), 1))
+    modes = (f'<DMXMode Name="RGBW" Geometry="Body"><DMXChannels>{rgbw}</DMXChannels></DMXMode>'
+             f'<DMXMode Name="RGB" Geometry="Body"><DMXChannels>{rgb}</DMXChannels></DMXMode>')
+    ft = gdtf.load(write_gdtf(tmp_path / "i.gdtf", fixture_xml("I", geos, modes)))
+    assert geotree.duplicate_steps(ft, ft.geometry("P01")) == [4, 3]
+    new, _ = geotree.duplicate(ft, ft.geometry("P01"), 2)
+    assert [[b.dmx_offset for b in g.breaks] for g in new.geometry("Body").children] == [[1, 1], [5, 4], [9, 7]]
+    assert [g.name for g in new.geometry("Body").children] == ["P01", "P02", "P03"]

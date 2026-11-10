@@ -81,4 +81,6 @@ Ctrl+Z annule. Le déplacement suit dans l'XML d'origine (et les chemins des can
 Clic droit : **regrouper** des géométries identiques (copies) en un modèle + des références
 (même nom, même position, mêmes adresses : la console voit les mêmes instances) et
 **fusionner** les modèles en double d'un mode à l'autre. Les copies à regrouper sont
-marquées « copie ×N ». GDTF seulement pour l'instant. Pas encore d'enregistrement du fichier.
+marquées « copie ×N ». **Dupliquer** une référence N fois à adresses contiguës (pas proposé
+d'après le modèle, un par jeu d'adresses comme sur l'iTetra2 ; alerte si une copie tombe sur
+des adresses déjà prises). GDTF seulement pour l'instant. Pas encore d'enregistrement du fichier.
