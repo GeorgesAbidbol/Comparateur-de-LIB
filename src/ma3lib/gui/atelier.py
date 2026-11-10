@@ -51,6 +51,9 @@ class GeoTree(QWidget):
         super().__init__(parent)
         self.setMouseTracking(True)
         self.root: Optional[Geometry] = None
+        self.models: list[Geometry] = []  # modèles référencés par le mode, rangeables eux aussi
+        self.model_uses: dict[str, int] = {}
+        self._models_y = 0.0
         self.useless: set[str] = set()
         self.doubles: set[str] = set()
         self.collapsed: set[str] = set()  # noms des géométries repliées
@@ -67,8 +70,10 @@ class GeoTree(QWidget):
         self._drop: Optional[tuple[_Row, str]] = None  # (ligne visée, "avant" / "dans" / "après")
 
     def set_root(self, root, useless: set[str], doubles: set[str],
-                 idents: Optional[dict[str, str]] = None, copies: Optional[dict[str, int]] = None) -> None:
+                 idents: Optional[dict[str, str]] = None, copies: Optional[dict[str, int]] = None,
+                 models: Optional[list[Geometry]] = None) -> None:
         self.root, self.useless, self.doubles = root, useless, doubles
+        self._set_models(root, models or [])
         self.idents = idents or {}  # nom de géométrie -> numéro de sélection MA3 (1.x.x.x)
         self.copies = copies or {}  # nom -> taille du groupe de copies identiques
         self.collapsed = set()
@@ -77,15 +82,23 @@ class GeoTree(QWidget):
         self._relayout()
         self.selected.emit(root)
 
+    def _set_models(self, root, models: list[Geometry]) -> None:
+        self.models = models
+        self.model_uses = {}
+        for g in (root.walk() if root else []):
+            if g.is_reference:
+                self.model_uses[g.reference] = self.model_uses.get(g.reference, 0) + 1
+
     def refresh(self, root, useless: set[str], doubles: set[str], idents: dict[str, str],
-                copies: Optional[dict[str, int]] = None) -> None:
+                copies: Optional[dict[str, int]] = None, models: Optional[list[Geometry]] = None) -> None:
         """Après une modification (le fixture a pu être relu) : mêmes lignes repliées,
         même sélection, retrouvées par leur nom."""
         names = [g.name for g in self.selection]
         cur = self.current.name if self.current else ""
         self.root, self.useless, self.doubles, self.idents = root, useless, doubles, idents
         self.copies = copies or {}
-        by_name = {g.name: g for g in root.walk()} if root else {}
+        self._set_models(root, models or [])
+        by_name = {g.name: g for t in ([root] if root else []) + self.models for g in t.walk()}
         self.selection = [by_name[n] for n in names if n in by_name]
         self.current = by_name.get(cur) or (self.selection[0] if self.selection else root)
         self._relayout()
@@ -102,6 +115,8 @@ class GeoTree(QWidget):
                                                          or g.name in self.doubles else "")
             if not flag and g.name in self.copies:
                 flag = "copie"
+            if not flag and g.parent is None and g.name in self.model_uses:
+                flag = "modele"
             if flag == "double":
                 key = g.reference or g.name
                 flag = "double-vu" if key in seen else "double"
@@ -115,6 +130,11 @@ class GeoTree(QWidget):
 
         if self.root:
             add(self.root, 0)
+        if self.models:
+            y += 26  # titre « Modèles »
+            self._models_y = y - 22
+            for m in self.models:
+                add(m, 0)
         self.setMinimumHeight(int(y + MARGIN))
         self.update()
 
@@ -166,20 +186,28 @@ class GeoTree(QWidget):
             if g.children and g.name in self.collapsed:
                 name += f"   ({len(g.children)})"
             right = r.rect.right() - 12
-            p.drawText(QRectF(x, r.rect.top(), right - x - 220, ROW_H), Qt.AlignVCenter | Qt.AlignLeft,
-                       p.fontMetrics().elidedText(name, Qt.ElideRight, int(right - x - 220)))
+            p.drawText(QRectF(x, r.rect.top(), right - x - 300, ROW_H), Qt.AlignVCenter | Qt.AlignLeft,
+                       p.fontMetrics().elidedText(name, Qt.ElideRight, int(right - x - 300)))
             # à droite : adresse et étiquette
             p.setFont(theme.font(9))
             info = f"@ {g.breaks[0].dmx_offset}" if g.breaks else ""
             tag, color = {"3d": ("3D seul", theme.TEXT_DIM), "double": ("modèle en double", theme.STATUS["jaune"]),
                           "double-vu": ("●", theme.STATUS["jaune"]),
-                          "copie": (f"copie ×{self.copies.get(g.name, 0)}", theme.STATUS["orange"])}\
+                          "copie": (f"copie ×{self.copies.get(g.name, 0)}", theme.STATUS["orange"]),
+                          "modele": (f"modèle ×{self.model_uses.get(g.name, 0)}", theme.STATUS["bleu"])}\
                 .get(r.flag, ("", theme.TEXT_DIM))
             p.setPen(theme.TEXT_DIM)
             p.drawText(QRectF(right - 60, r.rect.top(), 60, ROW_H), Qt.AlignVCenter | Qt.AlignRight, info)
+            if r.flag == "double" and g.parent is None and g.name in self.model_uses:
+                tag = f"modèle ×{self.model_uses[g.name]} · en double"
             p.setPen(color)
-            p.drawText(QRectF(right - 210, r.rect.top(), 140, ROW_H), Qt.AlignVCenter | Qt.AlignRight, tag)
+            p.drawText(QRectF(right - 290, r.rect.top(), 220, ROW_H), Qt.AlignVCenter | Qt.AlignRight, tag)
 
+        if self.models:
+            p.setPen(theme.TEXT_DIM)
+            p.setFont(theme.font(9, True))
+            p.drawText(QRectF(MARGIN, self._models_y, self.width(), 20), Qt.AlignLeft | Qt.AlignVCenter,
+                       "MODÈLES  —  ce qu'on range ici vaut pour toutes leurs références")
         if self._dragging and self._drop:
             row, zone = self._drop
             p.setBrush(Qt.NoBrush)
@@ -530,8 +558,19 @@ class AtelierWindow(QMainWindow):
             return
         mode = self.ft.mode(self.modes.currentText())
         root = self.ft.top_level(mode.geometry) if mode else None
-        self.tree.set_root(root, self.useless, self.doubles, self._idents(), self.copies)
+        self.tree.set_root(root, self.useless, self.doubles, self._idents(), self.copies,
+                           self._models(root))
         self._summary()
+
+    def _models(self, root) -> list[Geometry]:
+        """Modèles référencés par l'arbre du mode (et par leurs propres références)."""
+        out, todo = [], [root] if root else []
+        while todo:
+            for g in todo.pop().walk():
+                if g.is_reference and (tpl := self.ft.top_level(g.reference)) and all(tpl is not x for x in out):
+                    out.append(tpl)
+                    todo.append(tpl)
+        return out
 
     def _diagnose(self) -> None:
         self.useless = {g.name for g in diagnostic.geometries_3d_only(self.ft)}
@@ -548,7 +587,8 @@ class AtelierWindow(QMainWindow):
         self._diagnose()
         mode = self.ft.mode(self.modes.currentText())
         root = self.ft.top_level(mode.geometry) if mode else None
-        self.tree.refresh(root, self.useless, self.doubles, self._idents(), self.copies)
+        self.tree.refresh(root, self.useless, self.doubles, self._idents(), self.copies,
+                          self._models(root))
         self._summary()
         if self.tree.current is not None:
             self._select(self.tree.current)

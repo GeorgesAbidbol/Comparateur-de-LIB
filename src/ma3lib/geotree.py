@@ -61,7 +61,18 @@ def check(g: Geometry, new_parent: Geometry) -> Optional[str]:
         if node is g:
             return f"« {g.name} » ne peut pas aller dans sa propre descendance"
         node = node.parent
+    if _top(g) is not _top(new_parent):
+        # passer de l'arbre du mode à un modèle (ou l'inverse) changerait le nombre
+        # d'exemplaires de ses canaux : on range à l'intérieur d'un même arbre
+        return (f"« {g.name} » est dans « {_top(g).name} » : on range à l'intérieur d'un même "
+                f"arbre, pas vers « {_top(new_parent).name} »")
     return None
+
+
+def _top(g: Geometry) -> Geometry:
+    while g.parent is not None:
+        g = g.parent
+    return g
 
 
 def move(ft: FixtureType, geos: list[Geometry], new_parent: Geometry, index: int) -> Undo:

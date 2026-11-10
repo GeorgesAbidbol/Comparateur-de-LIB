@@ -105,15 +105,11 @@ def instances(ft: FixtureType, mode: DMXMode) -> Optional[Instance]:
     for ch in mode.channels:
         by_geo.setdefault(ch.geometry, []).append(ch)
 
-    def slots(g: Geometry) -> list[Slot]:
-        found: list[tuple[DMXChannel, int]] = [(c, 0) for c in by_geo.get(g.name, [])]
-        if g.is_reference:
-            tpl = ft.top_level(g.reference)
-            if tpl is not None:
-                for x in tpl.walk():
-                    found += [(c, _shift(c, g)) for c in by_geo.get(x.name, [])]
+    def own(g: Geometry, ref: Optional[Geometry]) -> list[Slot]:
+        """Canaux posés sur g ; dans un modèle, décalés par la référence qui le pose."""
         out = []
-        for ch, shift in found:
+        for ch in by_geo.get(g.name, []):
+            shift = _shift(ch, ref) if ref is not None else 0
             for lc in ch.logical_channels:
                 a = ft.attributes.get(lc.attribute)
                 out.append(Slot(lc.attribute, a.feature if a else "", a.pretty if a else "",
@@ -128,18 +124,27 @@ def instances(ft: FixtureType, mode: DMXMode) -> Optional[Instance]:
         return (c.kind == "Axis" and c.parent is not None
                 and sum(1 for x in c.parent.children if x.kind == "Axis") == 1)
 
-    def with_axes(g: Geometry) -> list[Slot]:
-        out = slots(g)
+    def with_axes(g: Geometry, ref: Optional[Geometry]) -> list[Slot]:
+        out = own(g, ref)
         for c in g.children:
             if merged(c):
-                out += with_axes(c)
+                out += with_axes(c, ref)
         return out
 
-    def build(g: Geometry) -> list[tuple[Geometry, list[Slot], list]]:
-        kids = [k for c in g.children for k in build(c)]
-        if merged(g):
-            return kids
-        mine = with_axes(g)
+    def build(g: Geometry, ref: Optional[Geometry] = None) -> list[tuple[Geometry, list[Slot], list]]:
+        if g.is_reference:
+            # une référence pose tout son modèle : la racine du modèle est l'instance, ses
+            # enfants qui portent des canaux en sont les sous-instances (ex. master > pixels)
+            tpl = ft.top_level(g.reference)
+            if tpl is None:
+                return []
+            mine = own(g, None) + with_axes(tpl, g)
+            kids = [k for c in tpl.children for k in build(c, g)]
+        else:
+            kids = [k for c in g.children for k in build(c, ref)]
+            if merged(g):
+                return kids
+            mine = with_axes(g, ref)
         return [(g, mine, kids)] if mine else kids
 
     def number(node, ident: str) -> Instance:
@@ -149,7 +154,7 @@ def instances(ft: FixtureType, mode: DMXMode) -> Optional[Instance]:
         return inst
 
     kids = [k for c in root.children for k in build(c)]
-    return number((root, with_axes(root), kids), "1")
+    return number((root, with_axes(root, None), kids), "1")
 
 
 def flatten(root: Optional[Instance]) -> list[Instance]:

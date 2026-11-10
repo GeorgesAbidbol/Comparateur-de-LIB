@@ -130,3 +130,27 @@ def test_duplicate_two_breaks_like_itetra(tmp_path):
     new, _ = geotree.duplicate(ft, ft.geometry("P01"), 2)
     assert [[b.dmx_offset for b in g.breaks] for g in new.geometry("Body").children] == [[1, 1], [5, 4], [9, 7]]
     assert [g.name for g in new.geometry("Body").children] == ["P01", "P02", "P03"]
+
+
+def test_arrange_inside_model(tmp_path):
+    """Masters A/B = 2 références au même modèle ; ranger les pixels sous le segment dans le
+    modèle les range pour A et pour B (sous-instances 1.1.x et 1.2.x)."""
+    from conftest import channel, fixture_xml, write_gdtf
+    model = ('<Geometry Name="Section"><Beam Name="Seg"/><Geometry Name="Pixels">'
+             '<Beam Name="Px1"/><Beam Name="Px2"/></Geometry></Geometry>')
+    refs = ''.join(f'<GeometryReference Name="{n}" Geometry="Section"><Break DMXOffset="{o}" DMXBreak="1"/>'
+                   '</GeometryReference>' for n, o in (("A", 1), ("B", 4)))
+    geos = f'<Geometry Name="Root">{refs}</Geometry>{model}'
+    chans = (channel("Seg", "Dimmer", 1, "Overwrite") + channel("Px1", "ColorAdd_R", 2, "Overwrite")
+             + channel("Px2", "ColorAdd_R", 3, "Overwrite"))
+    ft = gdtf.load(write_gdtf(tmp_path / "s.gdtf", fixture_xml(
+        "S", geos, f'<DMXMode Name="M" Geometry="Root"><DMXChannels>{chans}</DMXChannels></DMXMode>')))
+    assert [i for i, _ in _ids(ft)] == ["1", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6"]
+    seg = ft.geometry("Seg")
+    geotree.move(ft, list(ft.geometry("Pixels").children), seg, 0)
+    tree = compare.instances(ft, ft.modes[0])
+    assert [(i.ident, i.name, [s.coarse for s in i.slots]) for i in tree.walk()] == [
+        ("1", "Root", []), ("1.1", "Seg", [1]), ("1.1.1", "Px1", [2]), ("1.1.2", "Px2", [3]),
+        ("1.2", "Seg", [4]), ("1.2.1", "Px1", [5]), ("1.2.2", "Px2", [6])]
+    with pytest.raises(geotree.MoveError, match="même arbre"):
+        geotree.move(ft, [seg], ft.geometry("Root"), 0)
