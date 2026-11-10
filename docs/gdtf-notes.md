@@ -11,10 +11,12 @@ Trois notions à ne pas mélanger :
   des canaux ; sur la console, une géométrie qui porte des canaux devient une instance
   (1.x.x). Les niveaux sans canal se fondent dans le parent.
 - **Type de géométrie** : la balise du nœud (`Geometry`, `Axis`, `Beam`, `FilterColor`…).
-  Il dit *ce qu'est* la pièce : `Axis` bouge (pan / tilt), `Beam` émet de la lumière
-  (simulation 3D ; tout ce qui éclaire, segments et pixels compris, doit être `Beam`),
-  `Geometry` est un simple contenant. La console s'en sert aussi pour reconnaître des
-  instances de même nature entre fixtures (copie de programmation).
+  Il dit *ce qu'est* la pièce : `Axis` bouge (pan / tilt), `Geometry` est un contenant
+  (ex. la tête), `Beam` est la sortie de lumière. **Le `Beam` ne sert qu'à la 3D et à la
+  simulation de lumière** : sur la console il ne porte rien, ce sont la tête (ou le
+  segment, le pixel…) qui portent Dimmer, couleur, strobe… Le Beam est en général un
+  enfant sans canal de cette géométrie. Il ne faut pas le supprimer (on perdrait la
+  lumière en 3D), mais il ne crée pas d'instance.
 - **Géométrie référence** (`GeometryReference`) : **un exemplaire de plus d'un même type
   d'instance**. Dès qu'un même type d'instance se répète, on décrit une seule fois le
   modèle (géométrie de premier niveau, avec ses enfants et ses canaux en adresses
