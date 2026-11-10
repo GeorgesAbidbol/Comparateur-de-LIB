@@ -27,5 +27,7 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
 - [x] onPC : `C:\ProgramData\MALightingTechnology\gma3_library\fixturetypes` (confirmé par Jo).
 - [ ] Connexion GDTF Share réelle (non testable depuis l'environnement de dev).
 - [ ] Comment MA3 2.3.2.0 affiche un dimmer virtuel ajouté dans un GDTF.
-- [ ] Une géométrie Axis (tête qui bascule) se fond dans l'instance du dessus : vu sur
-  l'iTetra2 (Tilt porté par le fixture). À confirmer sur un fixture à plusieurs têtes.
+- [x] Axis : une tête seule se fond dans l'instance principale (iTetra2) ; plusieurs têtes
+  (12 tilts, copiées ou en références) = autant d'instances (confirmé par Jo, 10/11/2026).
+- [x] iTetra2 : un mode choisit le Break d'une référence par ses canaux (`DMXBreak="1"` →
+  premier Break, `"Overwrite"` → dernier). Voir `docs/gdtf-notes.md`.

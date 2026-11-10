@@ -52,3 +52,21 @@ def test_pair_rows_colors(tmp_path):
     assert compare.instance_status(tgt, src) == "vert"  # un attribut en plus dans la cible ne perd rien
     rows = compare.pair_rows(tgt, src, replaced={"Shutter1": "Dimmer"})
     assert rows[0].status == "vert"
+
+
+def test_several_heads_stay_instances(tmp_path):
+    """12 têtes tilt = 12 instances (copiées ou en références) ; une seule tête = fixture."""
+    copies = "".join(f'<Axis Name="Head {i}"/>' for i in range(1, 4))
+    refs = "".join(f'<GeometryReference Name="H{i}" Geometry="Head"><Break DMXOffset="{i}" DMXBreak="1"/>'
+                   "</GeometryReference>" for i in range(1, 4))
+    geos = (f'<Geometry Name="Base">{copies}</Geometry><Geometry Name="Base2">{refs}</Geometry>'
+            '<Axis Name="Head"/>')
+    chans = "".join(channel(f"Head {i}", "Tilt", i) for i in range(1, 4))
+    modes = (f'<DMXMode Name="Copies" Geometry="Base"><DMXChannels>{chans}</DMXChannels></DMXMode>'
+             f'<DMXMode Name="Refs" Geometry="Base2"><DMXChannels>{channel("Head", "Tilt", 1, "Overwrite")}'
+             "</DMXChannels></DMXMode>")
+    ft = gdtf.load(write_gdtf(tmp_path / "h.gdtf", fixture_xml("H", geos, modes)))
+    for m in ft.modes:
+        root = compare.instances(ft, m)
+        assert [i.ident for i in root.walk()] == ["1", "1.1", "1.2", "1.3"]
+        assert root.slots == []

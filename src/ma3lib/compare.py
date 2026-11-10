@@ -120,18 +120,24 @@ def instances(ft: FixtureType, mode: DMXMode) -> Optional[Instance]:
                                 [o + shift for o in ch.offset] if ch.offset else []))
         return out
 
+    def merged(c: Geometry) -> bool:
+        # Une Axis seule (tête qui bascule) se fond dans l'instance du dessus : sur la console
+        # de Jo, le Tilt de l'iTetra2 (Base > Axis Head) est porté par le fixture principal.
+        # Plusieurs Axis sœurs (12 têtes tilt copiées) = autant d'instances, comme des
+        # références (Jo, 10/11/2026 : « 12 tilts = 12 instances, 1 tilt = l'instance principale »).
+        return (c.kind == "Axis" and c.parent is not None
+                and sum(1 for x in c.parent.children if x.kind == "Axis") == 1)
+
     def with_axes(g: Geometry) -> list[Slot]:
-        # Une Axis (tête qui bascule) se fond dans l'instance du dessus : sur la console de Jo,
-        # le Tilt de l'iTetra2 (Base > Axis Head) est porté par le fixture principal.
         out = slots(g)
         for c in g.children:
-            if c.kind == "Axis":
+            if merged(c):
                 out += with_axes(c)
         return out
 
     def build(g: Geometry) -> list[tuple[Geometry, list[Slot], list]]:
         kids = [k for c in g.children for k in build(c)]
-        if g.kind == "Axis":
+        if merged(g):
             return kids
         mine = with_axes(g)
         return [(g, mine, kids)] if mine else kids
