@@ -40,3 +40,38 @@ def test_atelier_shows_3d_only(tricky):
     assert win.tree._rows and "Nettoyage proposé" in win.summary.text()
     win.grab()
     win.close()
+
+
+def test_atelier_drag_drop(tmp_path):
+    """Glisser les pixels sur le segment maître : ils deviennent ses enfants (1.1.x)."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+    from ma3lib.gui.atelier import AtelierWindow
+    from test_geotree import _ft
+
+    app = QApplication.instance() or QApplication([])
+    win = AtelierWindow()
+    ft = _ft(tmp_path)
+    win.load(str(ft.source))
+    win.resize(1200, 700)
+    win.show()
+    app.processEvents()
+    tree = win.tree
+    row = {r.geo.name: r for r in tree._rows}
+    pt = lambda r, f=0.5: QPoint(int(r.rect.left() + 140), int(r.rect.top() + f * r.rect.height()))
+    QTest.mouseClick(tree, Qt.LeftButton, Qt.NoModifier, pt(row["Px 1"]))
+    QTest.mouseClick(tree, Qt.LeftButton, Qt.ShiftModifier, pt(row["Px 3"]))
+    assert [g.name for g in tree.selection] == ["Px 1", "Px 2", "Px 3"]
+    QTest.mousePress(tree, Qt.LeftButton, Qt.NoModifier, pt(row["Px 2"]))
+    for f in (0.6, 0.7):  # quelques pas pour passer le seuil de glisser
+        QTest.mouseMove(tree, pt(row["Seg"], f))
+    QTest.mouseMove(tree, pt(row["Seg"]))
+    QTest.mouseRelease(tree, Qt.LeftButton, Qt.NoModifier, pt(row["Seg"]))
+    app.processEvents()
+    assert [c.name for c in win.ft.geometry("Seg").children] == ["Px 1", "Px 2", "Px 3"]
+    assert tree.idents["Px 3"] == "1.1.3"
+    win.undo()
+    assert win.ft.geometry("Seg").children == []
+    assert tree.idents["Px 3"] == "1.4"
+    win.close()

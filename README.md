@@ -72,7 +72,10 @@ ma3lib-gui source.gdtf cible.xml             # ouvre directement deux fichiers
 
 Captures : `docs/captures/`. Pas encore de sauvegarde ni d'écriture du fixture.
 
-Maquette de l'étape 3 (atelier géométries, affichage seulement) :
-`python -m ma3lib.gui.atelier fichier.gdtf [mode]`. Elle montre l'arbre complet du mode,
-les géométries 3D seules et les modèles en double, et les paramètres de la géométrie
-choisie (nom, type, modèle, adresse/Break, grille).
+Atelier géométries (étape 3, en cours) : `python -m ma3lib.gui.atelier fichier.gdtf [mode]`.
+Arbre complet du mode avec les numéros de sélection MA3 (1.x.x.x), les géométries 3D seules
+et les modèles en double, et les paramètres de la géométrie choisie (lecture seule pour
+l'instant). **Glisser-déposer** : lâcher sur le milieu d'une ligne = enfant, sur le haut ou
+le bas = avant / après ; Ctrl/Maj pour plusieurs ; les numéros se recalculent en direct ;
+Ctrl+Z annule. Le déplacement suit dans l'XML d'origine (et les chemins des canaux MA3).
+Pas encore d'enregistrement du fichier.

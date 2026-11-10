@@ -1,8 +1,12 @@
-"""Étape 3 (maquette) : atelier géométries.
+"""Étape 3 : atelier géométries.
 
-Affichage seulement pour l'instant : l'arbre complet des géométries d'un mode, avec ce que
-le diagnostic de l'étape 1 y trouve (géométries 3D seules, modèles en double), et le panneau
-des paramètres de la géométrie choisie (adresse, grille, type). Rien n'est encore modifié.
+L'arbre complet des géométries d'un mode, avec ce que le diagnostic de l'étape 1 y trouve
+(géométries 3D seules, modèles en double), et le panneau des paramètres de la géométrie
+choisie (adresse, grille, type ; encore en lecture seule).
+
+Glisser-déposer : lâcher sur le milieu d'une ligne = la géométrie devient son enfant,
+sur le haut ou le bas = avant ou après elle. Ctrl/Maj pour en prendre plusieurs.
+Les numéros 1.x.x.x se recalculent en direct. Ctrl+Z annule.
 Lancer : `python -m ma3lib.gui.atelier fichier.gdtf [mode]`.
 """
 
@@ -12,13 +16,13 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QPainter, QPen
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFormLayout, QHBoxLayout,
                                QLabel, QLineEdit, QMainWindow, QPushButton, QScrollArea, QSpinBox,
                                QVBoxLayout, QWidget)
 
-from .. import compare, diagnostic, gdtf
+from .. import compare, diagnostic, gdtf, geotree
 from ..gdtf import FixtureType, Geometry
 from . import theme
 
@@ -40,6 +44,7 @@ class _Row:
 
 class GeoTree(QWidget):
     selected = Signal(object)
+    dropped = Signal(list, object, int)  # géométries, nouveau parent, rang
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,6 +57,12 @@ class GeoTree(QWidget):
         self.idents: dict[str, str] = {}
         self._rows: list[_Row] = []
         self._hover: Optional[_Row] = None
+        self.selection: list[Geometry] = []
+        self._anchor: Optional[Geometry] = None
+        self._press: Optional[QPointF] = None
+        self._press_row: Optional[_Row] = None
+        self._dragging = False
+        self._drop: Optional[tuple[_Row, str]] = None  # (ligne visée, "avant" / "dans" / "après")
 
     def set_root(self, root, useless: set[str], doubles: set[str],
                  idents: Optional[dict[str, str]] = None) -> None:
@@ -59,8 +70,14 @@ class GeoTree(QWidget):
         self.idents = idents or {}  # nom de géométrie -> numéro de sélection MA3 (1.x.x.x)
         self.collapsed = set()
         self.current = root
+        self.selection = [root] if root else []
         self._relayout()
         self.selected.emit(root)
+
+    def refresh(self, useless: set[str], doubles: set[str], idents: dict[str, str]) -> None:
+        """Après un déplacement : mêmes lignes repliées, même sélection."""
+        self.useless, self.doubles, self.idents = useless, doubles, idents
+        self._relayout()
 
     def _relayout(self) -> None:
         self._rows = []
@@ -97,7 +114,7 @@ class GeoTree(QWidget):
         p.fillRect(self.rect(), theme.BG)
         for r in self._rows:
             g = r.geo
-            sel = g is self.current
+            sel = any(g is x for x in self.selection)
             fill = theme.HEADER if sel else (theme.ROW_HOVER if r is self._hover else theme.ROW)
             if r.flag == "3d" and not sel:
                 fill = theme.PANEL
@@ -148,26 +165,117 @@ class GeoTree(QWidget):
             p.setPen(color)
             p.drawText(QRectF(right - 210, r.rect.top(), 140, ROW_H), Qt.AlignVCenter | Qt.AlignRight, tag)
 
+        if self._dragging and self._drop:
+            row, zone = self._drop
+            p.setBrush(Qt.NoBrush)
+            if zone == "dans":
+                p.setPen(QPen(theme.ACCENT, 2))
+                p.drawRoundedRect(row.rect.adjusted(1, 1, -1, -1), 5, 5)
+            else:
+                y = row.rect.top() - GAP_Y / 2 if zone == "avant" else row.rect.bottom() + GAP_Y / 2
+                p.setPen(QPen(theme.ACCENT, 3))
+                p.drawLine(QPointF(row.rect.left(), y), QPointF(row.rect.right(), y))
+            n = len(self.selection)
+            p.setPen(theme.ACCENT)
+            p.setFont(theme.font(9, True))
+            p.drawText(self._drag_pos + QPointF(14, -6), f"{n} géométrie(s)" if n > 1 else self.selection[0].name)
+
     def _row_at(self, pos) -> Optional[_Row]:
         return next((r for r in self._rows if r.rect.contains(pos)), None)
 
+    def _visible(self) -> list[Geometry]:
+        return [r.geo for r in self._rows]
+
     def mousePressEvent(self, e):
         r = self._row_at(e.position())
-        if not r:
+        if not r or e.button() != Qt.LeftButton:
             return
         if r.geo.children and e.position().x() < r.rect.left() + 24:
             self.collapsed.symmetric_difference_update({id(r.geo)})
             self._relayout()
             return
+        mods = e.modifiers()
+        if mods & Qt.ControlModifier:
+            if any(r.geo is x for x in self.selection):
+                self.selection = [x for x in self.selection if x is not r.geo]
+            else:
+                self.selection.append(r.geo)
+            self._anchor = r.geo
+        elif mods & Qt.ShiftModifier and self._anchor is not None:
+            vis = self._visible()
+            ia, ib = _index(vis, self._anchor), _index(vis, r.geo)
+            a, b = sorted((ia, ib)) if ia >= 0 else (ib, ib)
+            self.selection = vis[a:b + 1]
+        elif not any(r.geo is x for x in self.selection):
+            self.selection = [r.geo]
+            self._anchor = r.geo
+        self._press, self._press_row = e.position(), r
         self.current = r.geo
         self.selected.emit(r.geo)
         self.update()
 
+    def _drop_at(self, pos) -> Optional[tuple[_Row, str]]:
+        r = self._row_at(pos) or next((x for x in self._rows
+                                        if x.rect.top() - GAP_Y <= pos.y() <= x.rect.bottom() + GAP_Y), None)
+        if r is None:
+            return None
+        rel = (pos.y() - r.rect.top()) / ROW_H
+        zone = "avant" if rel < 0.28 else ("après" if rel > 0.72 else "dans")
+        if r.geo.parent is None or (zone == "dans" and r.geo.is_reference):
+            zone = "dans"
+        parent, _ = self._target(r, zone)
+        if parent is None or any(geotree.check(g, parent) for g in self.selection):
+            return None
+        return r, zone
+
+    @staticmethod
+    def _target(r: _Row, zone: str) -> tuple[Optional[Geometry], int]:
+        if zone == "dans":
+            return r.geo, len(r.geo.children)
+        parent = r.geo.parent
+        if parent is None:
+            return None, 0
+        i = parent.children.index(r.geo)
+        return parent, i if zone == "avant" else i + 1
+
     def mouseMoveEvent(self, e):
-        r = self._row_at(e.position())
+        pos = e.position()
+        if self._press is not None and (e.buttons() & Qt.LeftButton):
+            if not self._dragging and (pos - self._press).manhattanLength() > 8 and self.selection:
+                self._dragging = True
+            if self._dragging:
+                self._drag_pos = pos
+                self._drop = self._drop_at(pos)
+                self.setCursor(Qt.ClosedHandCursor if self._drop else Qt.ForbiddenCursor)
+                self.update()
+                return
+        r = self._row_at(pos)
         if r is not self._hover:
             self._hover = r
             self.update()
+
+    def mouseReleaseEvent(self, e):
+        if self._dragging and self._drop:
+            row, zone = self._drop
+            parent, index = self._target(row, zone)
+            vis = self._visible()  # garder l'ordre affiché quand on en déplace plusieurs
+            geos = sorted(self.selection, key=lambda g: _index(vis, g))
+            if zone == "dans":
+                self.collapsed.discard(id(row.geo))
+            self.dropped.emit(geos, parent, index)
+        elif self._press_row is not None and not (e.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
+            self.selection = [self._press_row.geo]
+            self._anchor = self._press_row.geo
+        self._press = self._press_row = None
+        self._dragging = False
+        self._drop = None
+        self.unsetCursor()
+        self.update()
+
+
+def _index(items: list[Geometry], g: Optional[Geometry]) -> int:
+    """Rang par identité (l'égalité des dataclasses comparerait des sous-arbres entiers)."""
+    return next((i for i, x in enumerate(items) if x is g), -1)
 
 
 class MiniGrid(QWidget):
@@ -299,6 +407,9 @@ class AtelierWindow(QMainWindow):
 
         self.tree = GeoTree()
         self.tree.selected.connect(self._select)
+        self.tree.dropped.connect(self._move)
+        self.history: list[geotree.Undo] = []
+        QShortcut(QKeySequence.Undo, self, activated=self.undo)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.tree)
@@ -311,12 +422,17 @@ class AtelierWindow(QMainWindow):
 
         self.summary = QLabel()
         self.summary.setFont(theme.font(10))
+        self.status = QLabel()
+        self.status.setObjectName("dim")
+        self.status.setFont(theme.font(9))
         self.clean = QPushButton("Nettoyer…")
         self.clean.setEnabled(False)
         self.clean.setToolTip("Arrive avec les fonctions de l'étape 3")
         foot = QHBoxLayout()
         foot.setContentsMargins(14, 6, 14, 6)
-        foot.addWidget(self.summary, 1)
+        foot.addWidget(self.summary)
+        foot.addSpacing(24)
+        foot.addWidget(self.status, 1)
         foot.addWidget(self.clean)
 
         central = QWidget()
@@ -336,8 +452,9 @@ class AtelierWindow(QMainWindow):
 
     def load(self, path: str, mode: str = "") -> None:
         self.ft = gdtf.load(path)
-        self.useless = {g.name for g in diagnostic.geometries_3d_only(self.ft)}
-        self.doubles = {n for grp in diagnostic.duplicate_templates(self.ft) for n in grp}
+        self.history = []
+        self.status.setText("")
+        self._diagnose()
         self.open.setText(f"{self.ft.manufacturer} - {self.ft.name}")
         self.modes.blockSignals(True)
         self.modes.clear()
@@ -353,9 +470,44 @@ class AtelierWindow(QMainWindow):
             return
         mode = self.ft.mode(self.modes.currentText())
         root = self.ft.top_level(mode.geometry) if mode else None
+        self.tree.set_root(root, self.useless, self.doubles, self._idents())
+        self._summary()
+
+    def _diagnose(self) -> None:
+        self.useless = {g.name for g in diagnostic.geometries_3d_only(self.ft)}
+        self.doubles = {n for grp in diagnostic.duplicate_templates(self.ft) for n in grp}
+
+    def _idents(self) -> dict[str, str]:
+        mode = self.ft.mode(self.modes.currentText()) if self.ft else None
         inst = compare.instances(self.ft, mode) if mode else None
-        idents = {i.name: i.ident for i in compare.flatten(inst)}
-        self.tree.set_root(root, self.useless, self.doubles, idents)
+        return {i.name: i.ident for i in compare.flatten(inst)}
+
+    def _after_change(self, message: str) -> None:
+        self._diagnose()
+        self.tree.refresh(self.useless, self.doubles, self._idents())
+        self._summary()
+        if self.tree.current is not None:
+            self._select(self.tree.current)
+        self.status.setText(message)
+        self.setWindowTitle("Comparateur de LIB · Atelier géométries" + (" •" if self.history else ""))
+
+    def _move(self, geos: list, parent: Geometry, index: int) -> None:
+        try:
+            self.history.append(geotree.move(self.ft, geos, parent, index))
+        except geotree.MoveError as exc:
+            self.status.setText(str(exc))
+            return
+        what = f"{len(geos)} géométries" if len(geos) > 1 else f"« {geos[0].name} »"
+        self._after_change(f"{what} → sous « {parent.name} »   ·   Ctrl+Z pour annuler")
+
+    def undo(self) -> None:
+        if self.ft and self.history:
+            geotree.undo(self.ft, self.history.pop())
+            self._after_change("Déplacement annulé")
+
+    def _summary(self) -> None:
+        mode = self.ft.mode(self.modes.currentText())
+        root = self.ft.top_level(mode.geometry) if mode else None
         names = {g.name for g in root.walk()} if root else set()
         n3d = len(names & self.useless)
         refs = {g.reference for g in root.walk() if g.is_reference} if root else set()
