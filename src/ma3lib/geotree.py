@@ -718,3 +718,68 @@ def grid_proposal(g: Geometry, ft: Optional[FixtureType] = None) -> tuple[int, i
     else:
         row = ys.index(round(me[1], 3)) if len(ys) > 1 else 0
     return col, row
+
+
+# --------------------------------------------------------------------------
+# Supprimer la 3D seule (Jo, 10/11/2026 : « je m'en fiche de la 3D, ça fout le bazar
+# dans les lib, la compréhension des géométries et le patch des références »)
+
+def channel_less(ft: FixtureType) -> list[Geometry]:
+    """Sommets des sous-arbres qui ne portent aucun canal, mode par mode : une référence
+    n'est gardée que si son modèle porte des canaux dans un mode qui utilise cette référence
+    (les 19 LED du mode Standard du Nando partent, celles de l'Extended Pixel restent).
+    Beams, Axis, câblage et modèles inutilisés compris."""
+    keep: set[int] = set()
+
+    def mark(g: Geometry, chans: set[str], seen: dict[int, bool]) -> bool:
+        if id(g) in seen:  # modèle déjà vu dans ce mode
+            return seen[id(g)]
+        seen[id(g)] = False
+        useful = g.name in chans
+        for c in g.children:
+            useful = mark(c, chans, seen) or useful
+        if g.is_reference:
+            tpl = ft.top_level(g.reference)
+            if tpl is not None and mark(tpl, chans, seen):
+                useful = True
+        if useful:
+            keep.add(id(g))
+        seen[id(g)] = useful
+        return useful
+
+    for m in ft.modes:
+        root = ft.top_level(m.geometry)
+        if root is None:
+            continue
+        mark(root, {ch.geometry for ch in m.channels}, {})
+        keep.add(id(root))
+
+    out: list[Geometry] = []
+
+    def visit(g: Geometry) -> None:
+        if id(g) not in keep:
+            out.append(g)
+            return
+        for c in g.children:
+            visit(c)
+
+    for top in ft.geometries:
+        visit(top)
+    return out
+
+
+def strip_3d(ft: FixtureType) -> tuple[FixtureType, str]:
+    """Retire tout ce que `channel_less` trouve. Les canaux et adresses ne bougent pas."""
+    gone = channel_less(ft)
+    if not gone:
+        return ft, "Rien à retirer : toutes les géométries portent des canaux"
+    node = ft.xml_root.find("FixtureType")
+    parents = {id(c): p for p in node.iter() for c in p}
+    count = 0
+    for g in gone:
+        el = element_of(ft, g)
+        if el is not None and id(el) in parents:
+            parents[id(el)].remove(el)
+            count += sum(1 for _ in g.walk())
+    return restore(ft, ET.tostring(ft.xml_root, encoding="utf-8")), \
+        f"{count} géométries sans canal retirées (3D seule)"

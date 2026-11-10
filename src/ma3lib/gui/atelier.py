@@ -618,6 +618,11 @@ class AtelierWindow(QMainWindow):
         self.status = QLabel()
         self.status.setObjectName("dim")
         self.status.setFont(theme.font(9))
+        self.strip_button = QPushButton("Retirer la 3D")
+        self.strip_button.setEnabled(False)
+        self.strip_button.setToolTip("Supprime toutes les géométries sans canal (Beams, câblage, références"
+                                     " 3D), dans tous les modes. Les adresses ne bougent pas. Ctrl+Z annule.")
+        self.strip_button.clicked.connect(self.strip_3d)
         self.export_button = QPushButton("Exporter…")
         self.export_button.setEnabled(False)
         self.export_button.setToolTip("Enregistrer en XML MA3 2.3.2.0 (onPC, clé USB ou dossier)")
@@ -627,6 +632,7 @@ class AtelierWindow(QMainWindow):
         foot.addWidget(self.summary)
         foot.addSpacing(24)
         foot.addWidget(self.status, 1)
+        foot.addWidget(self.strip_button)
         foot.addWidget(self.export_button)
 
         central = QWidget()
@@ -660,6 +666,10 @@ class AtelierWindow(QMainWindow):
         self.export_button.setEnabled(True)
         self._mode_changed()
 
+    def strip_3d(self) -> None:
+        if self.ft and self._apply(geotree.strip_3d):
+            self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
+
     def export(self) -> None:
         if not self.ft:
             return
@@ -688,7 +698,8 @@ class AtelierWindow(QMainWindow):
         return out
 
     def _diagnose(self) -> None:
-        self.useless = {g.name for g in diagnostic.geometries_3d_only(self.ft)}
+        # tout ce qui ne porte aucun canal, Beams compris (Jo, 10/11/2026 : la 3D ne l'intéresse pas)
+        self.useless = {g.name for g in geotree.channel_less(self.ft)}
         self.doubles = {n for grp in diagnostic.duplicate_templates(self.ft) for n in grp}
         self.copies = {n: len(g.names) for g in diagnostic.find_instance_groups(self.ft)
                        if not g.per_mode_variants for n in g.names}
@@ -790,6 +801,7 @@ class AtelierWindow(QMainWindow):
         n3d = len(names & self.useless)
         refs = {g.reference for g in root.walk() if g.is_reference} if root else set()
         ndbl = len((names | refs) & self.doubles)
+        self.strip_button.setEnabled(bool(self.useless))
         dot = lambda c: f"<span style='color:{c}; font-size:15px'>●</span>"
         self.summary.setText(
             f"Nettoyage proposé pour ce mode :  {dot(theme.TEXT_DIM.name())} {n3d} géométrie(s) 3D seule(s)"

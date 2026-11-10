@@ -178,3 +178,32 @@ def test_edit_shift_channels_and_grid(bad_bar):
     el = geotree.element_of(new, new.geometry("Pixel1"))
     assert (el.get("GridAuto"), el.get("GridX"), el.get("GridZ")) == ("Manual", "0", "0")
     assert geotree.grid_proposal(new.geometry("Pixel3")) == (2, 0)  # pas de position : dans l'ordre
+
+
+def test_strip_3d_per_mode(tmp_path):
+    """Nando 502 : les références LED portent des canaux en mode Pixel, pas en mode Standard
+    (la tête porte tout). On ne les retire que là où elles ne servent pas."""
+    from conftest import channel, fixture_xml, write_gdtf
+    refs = lambda t: "".join(f'<GeometryReference Name="L{i} {t}" Geometry="LED"><Break DMXOffset="{i + 1}" DMXBreak="1"/>'
+                             "</GeometryReference>" for i in range(1, 4))
+    geos = (f'<Geometry Name="Base Px"><Axis Name="Head Px">{refs("Px")}</Axis></Geometry>'
+            f'<Geometry Name="Base Std"><Axis Name="Head Std">{refs("Std")}<Beam Name="Lens Std"/></Axis>'
+            '<Geometry Name="Pigtail Std"><WiringObject Name="DMX IN"/></Geometry></Geometry>'
+            '<Beam Name="LED"/><Geometry Name="Unused"/>')
+    px = channel("Head Px", "Dimmer", 1) + channel("LED", "ColorAdd_R", 1, "Overwrite")
+    std = channel("Head Std", "Dimmer", 1)
+    modes = (f'<DMXMode Name="Pixel" Geometry="Base Px"><DMXChannels>{px}</DMXChannels></DMXMode>'
+             f'<DMXMode Name="Standard" Geometry="Base Std"><DMXChannels>{std}</DMXChannels></DMXMode>')
+    ft = gdtf.load(write_gdtf(tmp_path / "n.gdtf", fixture_xml("N", geos, modes)))
+    gone = {g.name for g in geotree.channel_less(ft)}
+    assert gone == {"L1 Std", "L2 Std", "L3 Std", "Lens Std", "Pigtail Std", "Unused"}
+    before = {m.name: compare.instances(ft, m) for m in ft.modes}
+    ft2, msg = geotree.strip_3d(ft)
+    assert "7 géométries" in msg
+    assert ft2.geometry("L1 Px") is not None and ft2.top_level("LED") is not None
+    for m in ft2.modes:
+        a = [(i.ident, [(s.attribute, s.addresses) for s in i.slots]) for i in compare.flatten(before[m.name])]
+        b = [(i.ident, [(s.attribute, s.addresses) for s in i.slots])
+             for i in compare.flatten(compare.instances(ft2, m))]
+        assert a == b
+    assert geotree.strip_3d(ft2)[1].startswith("Rien")

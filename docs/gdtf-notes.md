@@ -86,14 +86,20 @@ Les GDTF Robe servent d'étalon. Exemple Robin Esprite (GDTF 1.2) :
 1 (2)  Base [Geometry]            canaux généraux (Control1, vitesses, LEDFrequency…)
   1 (1)  Yoke [Axis]              Pan
     1 (1)  Head [Axis]            Tilt + toutes les fonctions optiques + Dimmer
-      1      Beam [Beam]          aucun canal, gardé (repère console)
+      1      Beam [Beam]          aucun canal : retiré par « Retirer la 3D »
   2 (6)  Pigtail [Geometry]       connecteurs (WiringObject) : pur 3D
 ```
 
 - Noms de géométries courts et en anglais : Base, Yoke, Head, Beam.
 - Canaux nommés `<Géométrie>_<Attribut>` (Yoke_Pan, Head_Tilt).
 - Un mode = une racine (Base), pas de copie d'arbre par mode.
-- Connecteurs regroupés sous un « Pigtail » : seul élément à supprimer au nettoyage.
+- Connecteurs regroupés sous un « Pigtail ».
+
+**Règle de Jo (10/11/2026)** : la 3D ne l'intéresse pas, elle encombre les librairies, la
+lecture des géométries et le patch des références. « Retirer la 3D » (atelier,
+`geotree.strip_3d`) supprime toute géométrie qui ne porte aucun canal dans les modes qui
+l'utilisent : Beams vides, câblage, références de pixels sans canal (ex. les 19 LED du mode
+Standard du Nando 502, qui gardent leurs canaux en mode Pixel). Canaux et adresses ne bougent pas.
 
 À vérifier : comment MA3 présente les Axis (Yoke/Head) dans le SubfixtureOverview.
 
