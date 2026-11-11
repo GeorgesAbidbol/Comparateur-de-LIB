@@ -11,3 +11,5 @@ Usage personnel de Jo, programmeur grandMA en tournée (gros parcs, 800+ fixture
 - Toute modification de GDTF doit préserver ce qu'on ne comprend pas
   (on garde l'arbre XML d'origine dans `FixtureType.xml_root`).
 - Plan et points à vérifier : `docs/plan.md`. Tester avec `python -m pytest`.
+- Version : `__version__` dans `src/ma3lib/__init__.py` (et `pyproject.toml`), affichée dans le titre
+  des fenêtres. **L'incrémenter à chaque zip livré à Jo** (`Comparateur-de-LIB-v<version>.zip`).

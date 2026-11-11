@@ -25,6 +25,9 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBo
 from .. import compare, diagnostic, gdtf, geotree
 from ..gdtf import FixtureType, Geometry
 from . import theme
+from .. import __version__
+
+TITLE = f"Comparateur de LIB v{__version__} · Atelier géométries"
 
 ROW_H = 30
 GAP_Y = 4
@@ -580,7 +583,7 @@ class EditDialog(QDialog):
 class AtelierWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Comparateur de LIB · Atelier géométries")
+        self.setWindowTitle(TITLE)
         self.resize(1300, 820)
         self.ft: Optional[FixtureType] = None
 
@@ -733,7 +736,7 @@ class AtelierWindow(QMainWindow):
         if self.tree.current is not None:
             self._select(self.tree.current)
         self.status.setText(message)
-        self.setWindowTitle("Comparateur de LIB · Atelier géométries" + (" •" if self.history else ""))
+        self.setWindowTitle(TITLE + (" •" if self.history else ""))
 
     def _apply(self, action, *args) -> bool:
         """Lance une opération de geotree, garde de quoi annuler, affiche le résultat."""

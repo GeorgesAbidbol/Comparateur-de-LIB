@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout, QMainWindow,
                                QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
-from .. import compare, gdtf
+from .. import __version__, compare, gdtf
 from ..gdtf import FixtureType
 from . import theme
 from .canvas import LinkCanvas
@@ -39,7 +39,7 @@ class _Side:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Comparateur de LIB")
+        self.setWindowTitle(f"Comparateur de LIB v{__version__}")
         self.resize(1280, 820)
 
         self.sides = {"source": _Side("source", "Source"), "cible": _Side("cible", "Cible")}
