@@ -1,7 +1,8 @@
 """Client GDTF Share (https://gdtf-share.com) : connexion, liste, téléchargement.
 
-NON TESTÉ en réel : le site n'est pas joignable depuis l'environnement de dev.
-Les points d'accès suivent l'API publique documentée par GDTF Share :
+Testé contre le vrai site le 2026-11-11 : connexion, liste (~13 500 entrées,
+champ « uploader » = « Manuf. » ou « User »), téléchargement et ouverture des
+GDTF Robin iTetra2, Nando 502 et Color Strike M. Points d'accès :
   POST apis/public/login.php        {"user": ..., "password": ...}
   GET  apis/public/getList.php      -> {"result": true, "list": [...]}
   GET  apis/public/downloadFile.php?rid=<id>
