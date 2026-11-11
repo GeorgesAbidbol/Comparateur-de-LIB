@@ -146,3 +146,18 @@ def test_export_dialog(good_bar, tmp_path):
     dlg.export()
     assert dlg.written == tmp_path / "Test@GoodBar JO.xml"
     assert gdtf.load(dlg.written).name == "GoodBar JO"
+
+
+def test_single_app_with_sections(good_bar):
+    from PySide6.QtWidgets import QApplication
+    from ma3lib.gui.app import AppWindow
+    app = QApplication.instance() or QApplication([])
+    win = AppWindow()
+    assert [b.text() for b in win.buttons.buttons()] == ["Atelier", "Comparateur"]
+    win.atelier.load(str(good_bar))
+    assert win.stack.currentWidget() is win.atelier
+    win.buttons.button(1).click()
+    assert win.stack.currentWidget() is win.comparateur
+    win.comparateur.load("source", str(good_bar))
+    win.show_section("Atelier")
+    assert win.stack.currentIndex() == 0 and win.atelier.ft.name == "GoodBar"

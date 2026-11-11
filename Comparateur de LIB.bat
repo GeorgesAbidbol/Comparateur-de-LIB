@@ -1,5 +1,5 @@
 @echo off
-rem Lance le comparateur. Premier lancement : installe Python si besoin, cree .venv, installe PySide6.
+rem Lance le Comparateur de LIB. Premier lancement : installe Python si besoin, cree .venv, installe PySide6.
 cd /d "%~dp0"
 if exist ".venv\Scripts\pythonw.exe" goto run
 

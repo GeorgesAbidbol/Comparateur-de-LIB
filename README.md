@@ -91,9 +91,10 @@ Regrouper, fusionner et dupliquer : GDTF seulement pour l'instant.
 
 ## Lancer sous Windows
 
-Double-clic sur `Atelier.bat` ou `Comparateur.bat`. Le premier lancement installe Python 3.12
-avec winget s'il manque, crée `.venv` et installe PySide6. On peut glisser un `.gdtf` ou un `.xml` sur
-`Atelier.bat` pour l'ouvrir directement.
+Une seule appli : double-clic sur `Comparateur de LIB.bat`. Le premier lancement installe
+Python 3.12 avec winget s'il manque, crée `.venv` et installe PySide6. La fenêtre a une section
+par outil (Atelier, Comparateur) ; les prochains outils s'y ajouteront. On peut glisser un
+`.gdtf` ou un `.xml` sur le lanceur pour l'ouvrir dans l'atelier. Ailleurs : `python -m ma3lib.gui`.
 
 ## Étape 4 : exporter pour grandMA3 2.3.2.0
 

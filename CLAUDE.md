@@ -13,3 +13,5 @@ Usage personnel de Jo, programmeur grandMA en tournée (gros parcs, 800+ fixture
 - Plan et points à vérifier : `docs/plan.md`. Tester avec `python -m pytest`.
 - Version : `__version__` dans `src/ma3lib/__init__.py` (et `pyproject.toml`), affichée dans le titre
   des fenêtres. **L'incrémenter à chaque zip livré à Jo** (`Comparateur-de-LIB-v<version>.zip`).
+- **Une seule appli** (Jo, 11/11/2026) : tout outil est une section de `gui/app.py` (AppWindow),
+  jamais un programme ou un lanceur à part.
