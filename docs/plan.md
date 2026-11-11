@@ -24,6 +24,13 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
    `docs/ma3-xml-notes.md`), bouton « Exporter… » de l'atelier (nom, note, GUID, destination),
    commande `python -m ma3lib export`. Reste : export depuis le comparateur, test onPC.
 
+   Ajouts du 11/11/2026 (retours de Jo) : panneau de droite de l'atelier actif (nom, type, modèle
+   de référence choisi ou créé, mesh avec banque de formes simples `meshbank.py` ou repris d'un
+   autre GDTF), correction de la charte DMX par géométrie (`charte_dmx.py` : adresse, 8/16 bits,
+   attribut, défaut, ajout, retrait ; GDTF seulement), section « GDTF Share » en explorateur
+   (`gui/share.py`, fabricants seulement, compte dans le coffre Windows), comparateur en deux
+   panneaux. Installeur Windows préparé (`packaging/`), à fabriquer quand Jo le demandera.
+
 5. **Créer un fixture de zéro** (Jo, 11/11/2026 : « partir de 0, soit en glissant un PDF, soit en
    rentrant soi-même les paramètres, adresses et arborescence de géométrie »).
    Fait (v0.5.0) : section « Créer » de l'appli (`gui/creer.py`).

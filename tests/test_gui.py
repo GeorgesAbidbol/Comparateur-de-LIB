@@ -446,3 +446,54 @@ def test_share_section_searches_and_opens_in_atelier(good_bar, tmp_path):
     assert again.client is not None and again.makers.count() == 2
     again.disconnect_account()
     assert coffre.load(vault) is None and again.client is None and not again.search.isEnabled()
+
+
+def test_dmx_chart_correction_in_atelier(bad_bar, monkeypatch):
+    """Jo, 11/11/2026 : corriger la charte DMX dans l'atelier (adresse, 16 bits, attribut, ajout, retrait)."""
+    from PySide6.QtWidgets import QApplication, QDialog
+    from ma3lib import charte_dmx, ma3xml
+    from ma3lib.gui import atelier
+
+    app = QApplication.instance() or QApplication([])
+    win = atelier.AtelierWindow()
+    win.load(str(bad_bar))
+
+    def pick(name):
+        g = win.ft.geometry(name)
+        win.tree.selection, win.tree.current = [g], g
+        win._select(g)
+
+    def answer(*values):
+        monkeypatch.setattr(atelier.ChannelDialog, "exec", lambda self: QDialog.Accepted)
+        monkeypatch.setattr(atelier.ChannelDialog, "values", lambda self: values)
+
+    def rows(name):
+        return [(r.attribute, r.offsets) for r in charte_dmx.lignes(win.ft, "12ch", win.ft.geometry(name))]
+
+    pick("Pixel1")
+    assert win.params.channels.count() == 3
+    assert rows("Pixel1") == [("ColorAdd_R", [1]), ("ColorAdd_G", [2]), ("ColorAdd_B", [3])]
+    # une adresse déjà prise est refusée
+    answer("ColorAdd_R", [5], "")
+    win._channel("edit", "ColorAdd_R")
+    assert "déjà prise" in win.status.text() and rows("Pixel1")[0] == ("ColorAdd_R", [1])
+    # ajouter un dimmer 16 bits sur la base, puis changer son attribut et son défaut
+    pick("Body")
+    assert win.params.channels.count() == 0
+    answer("Dimmer", [13, 14], "")
+    win._channel("add", "")
+    assert rows("Body") == [("Dimmer", [13, 14])]
+    answer("Shutter1", [13], "255/1")
+    win._channel("edit", "Dimmer")
+    assert rows("Body") == [("Shutter1", [13])]
+    assert charte_dmx.lignes(win.ft, "12ch", win.ft.geometry("Body"))[0].default == "255/1"
+    names = [a.get("Name") for a in win.ft.xml_root.iterfind("FixtureType/AttributeDefinitions/Attributes/Attribute")]
+    assert "Shutter1" in names
+    # le fixture corrigé s'exporte toujours
+    node = ma3xml.convert(win.ft).find("FixtureType")
+    assert any(c.get("Geometry") == "Body" and c.get("Coarse") == "13" for c in node.iter("DMXChannel"))
+    # retirer, puis annuler
+    win._channel("remove", "Shutter1")
+    assert rows("Body") == []
+    win.undo()
+    assert rows("Body") == [("Shutter1", [13])]

@@ -19,10 +19,10 @@ from typing import Optional
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-                               QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton,
+                               QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QPushButton,
                                QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
-from .. import compare, diagnostic, gdtf, geotree
+from .. import charte_dmx, compare, diagnostic, gdtf, geotree
 from ..gdtf import FixtureType, Geometry
 from . import theme
 from .. import APP_NAME, __version__
@@ -397,6 +397,7 @@ class Params(QWidget):
     « Appliquer » écrit ce qui a changé (signal `applied`)."""
 
     applied = Signal()
+    channelAsked = Signal(str, str)  # « add » / « edit » / « remove », attribut du canal
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -426,6 +427,19 @@ class Params(QWidget):
         self.note = QLabel()
         self.note.setWordWrap(True)
         self.note.setObjectName("dim")
+        # charte DMX de la géométrie dans le mode en cours (Jo, 11/11/2026)
+        self.chan_title = QLabel("Canaux dans ce mode")
+        self.chan_title.setFont(theme.font(10, True))
+        self.channels = QListWidget()
+        self.channels.setFixedHeight(230)
+        self.channels.itemDoubleClicked.connect(lambda _: self._chan("edit"))
+        self.channels.itemSelectionChanged.connect(self._chan_buttons)
+        self.chan_add = QPushButton("+ Canal")
+        self.chan_edit = QPushButton("Modifier…")
+        self.chan_del = QPushButton("Retirer")
+        self.chan_add.clicked.connect(lambda: self.channelAsked.emit("add", ""))
+        self.chan_edit.clicked.connect(lambda: self._chan("edit"))
+        self.chan_del.clicked.connect(lambda: self._chan("remove"))
         self.button = QPushButton("Appliquer")
         self.button.setFont(theme.font(10, True))
         self.button.clicked.connect(lambda: self.applied.emit())
@@ -455,12 +469,50 @@ class Params(QWidget):
         lay.addWidget(self.title)
         lay.addLayout(form)
         lay.addWidget(self.button, 0, Qt.AlignRight)
+        lay.addSpacing(4)
+        lay.addWidget(self.chan_title)
+        lay.addWidget(self.channels)
+        chan_row = QHBoxLayout()
+        chan_row.addWidget(self.chan_add)
+        chan_row.addStretch(1)
+        chan_row.addWidget(self.chan_edit)
+        chan_row.addWidget(self.chan_del)
+        lay.addLayout(chan_row)
         lay.addWidget(self.grid)
         lay.addWidget(self.note)
         lay.addStretch(1)
         self.setStyleSheet(f"QLineEdit, QSpinBox {{ background: {theme.ROW.name()}; border: none;"
                            f" border-radius: 6px; padding: 6px 10px; }}"
-                           f"QSpinBox:disabled {{ color: {theme.TEXT_DIM.name()}; }}")
+                           f"QSpinBox:disabled {{ color: {theme.TEXT_DIM.name()}; }}"
+                           f"QListWidget {{ background: {theme.PANEL.name()}; border: none; border-radius: 8px;"
+                           f" padding: 4px; outline: none; }}"
+                           f"QListWidget::item {{ padding: 5px 8px; border-radius: 5px; }}"
+                           f"QListWidget::item:selected {{ background: {theme.HEADER.name()};"
+                           f" color: {theme.TEXT.name()}; }}"
+                           f"QPushButton:disabled {{ color: {theme.TEXT_DIM.name()}; }}")
+        self._chan_buttons()
+
+    def _chan(self, what: str) -> None:
+        item = self.channels.currentItem()
+        if item is not None:
+            self.channelAsked.emit(what, item.data(Qt.UserRole))
+
+    def _chan_buttons(self) -> None:
+        on = bool(self.channels.selectedItems())
+        self.chan_edit.setEnabled(on)
+        self.chan_del.setEnabled(on)
+
+    def show_channels(self, rows: list, carrier: str, own: bool) -> None:
+        """Les canaux de la géométrie ; pour une référence, ceux de son modèle."""
+        self.chan_title.setText("Canaux dans ce mode" if own else f"Canaux du modèle « {carrier} »")
+        self.channels.clear()
+        for r in rows:
+            where = "/".join(map(str, r.offsets)) if r.offsets else "virtuel"
+            item = QListWidgetItem(f"{where:<8}{r.attribute}     ·  {r.bits} bits"
+                                   + (f"  ·  défaut {r.default}" if r.default else ""))
+            item.setData(Qt.UserRole, r.attribute)
+            self.channels.addItem(item)
+        self._chan_buttons()
 
     def _kind_changed(self, kind: str) -> None:
         self.model.setEnabled(kind == REF)
@@ -520,6 +572,46 @@ class Params(QWidget):
         if (self.gx.value(), self.gy.value()) != self.place:
             e.grid = (self.gx.value(), self.gy.value())
         return e
+
+
+class ChannelDialog(QDialog):
+    """Un canal de la charte DMX : attribut, adresses (coarse, fine…), valeur par défaut."""
+
+    def __init__(self, title: str, attributes: list[str], attribute: str = "", offsets=None,
+                 default: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(420)
+        self.attribute = QComboBox()
+        self.attribute.setEditable(True)
+        self.attribute.addItems(attributes)
+        self.attribute.setCurrentText(attribute)
+        self.offsets = QLineEdit(",".join(map(str, offsets or [])))
+        self.offsets.setPlaceholderText("ex. 5   ou   5,6 pour 16 bits   (vide = virtuel)")
+        self.default = QLineEdit(default)
+        self.default.setPlaceholderText("ex. 0/1   ou   32768/2")
+        form = QFormLayout(self)
+        form.setContentsMargins(18, 16, 18, 14)
+        form.setVerticalSpacing(10)
+        form.addRow("Attribut", self.attribute)
+        form.addRow("Adresses", self.offsets)
+        if default or attribute:
+            form.addRow("Défaut", self.default)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Appliquer")
+        buttons.button(QDialogButtonBox.Cancel).setText("Annuler")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+        self.setStyleSheet(f"QLineEdit {{ background: {theme.ROW.name()}; border: none;"
+                           f" border-radius: 6px; padding: 6px 10px; }}")
+
+    def values(self) -> tuple[str, Optional[list[int]], str]:
+        """(attribut, adresses ou None si illisibles, défaut)."""
+        text = self.offsets.text().replace(";", ",").replace("/", ",").replace(" ", ",")
+        parts = [p for p in text.split(",") if p]
+        offsets = [int(p) for p in parts] if all(p.isdigit() for p in parts) else None
+        return self.attribute.currentText().strip(), offsets, self.default.text().strip()
 
 
 class DuplicateDialog(QDialog):
@@ -694,6 +786,7 @@ class AtelierWindow(QMainWindow):
         self.params = Params()
         self.params.setFixedWidth(400)
         self.params.applied.connect(self._apply_params)
+        self.params.channelAsked.connect(self._channel)
         mid = QHBoxLayout()
         mid.setSpacing(0)
         mid.addWidget(scroll, 1)
@@ -925,6 +1018,43 @@ class AtelierWindow(QMainWindow):
         self.params.show_geo(g, g is not None and g.name in self.useless,
                              self.tree.idents.get(g.name, "") if g is not None else "", self.ft,
                              geotree.models(self.ft) if self.ft else [], len(self.tree.selection))
+        if g is not None and self.ft is not None:
+            self.params.show_channels(charte_dmx.lignes(self.ft, self.modes.currentText(), g),
+                                      charte_dmx.carrier(g), not g.is_reference)
+
+    def _channel(self, what: str, attribute: str) -> None:
+        """Correction de la charte DMX depuis le panneau : ajouter, modifier, retirer un canal."""
+        g = self.params.geo
+        if self.ft is None or g is None:
+            return
+        mode, geo = self.modes.currentText(), charte_dmx.carrier(g)
+        if what == "remove":
+            ok = self._apply(charte_dmx.retirer, mode, geo, attribute)
+        else:
+            known = charte_dmx.attributs_connus(self.ft)
+            if what == "add":
+                try:
+                    free = [charte_dmx.libre(self.ft, mode, geo)]
+                except geotree.MoveError as exc:
+                    self.status.setText(f"Impossible : {exc}")
+                    return
+                dlg = ChannelDialog(f"Nouveau canal sur « {geo} »", known, "", free, "", self)
+            else:
+                row = next(r for r in charte_dmx.lignes(self.ft, mode, g) if r.attribute == attribute)
+                dlg = ChannelDialog(f"Canal « {geo}_{attribute} »", known, attribute, row.offsets,
+                                    row.default, self)
+            if dlg.exec() != QDialog.Accepted:
+                return
+            new, offsets, default = dlg.values()
+            if offsets is None:
+                self.status.setText("Impossible : adresses illisibles (attendu 5 ou 5,6)")
+                return
+            if what == "add":
+                ok = self._apply(charte_dmx.ajouter, mode, geo, new, offsets)
+            else:
+                ok = self._apply(charte_dmx.modifier, mode, geo, attribute, offsets, new, default or None)
+        if ok:
+            self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
 
     def _apply_params(self) -> None:
         """Bouton « Appliquer » du panneau : référence (modèle choisi ou créé), puis nom, type,
