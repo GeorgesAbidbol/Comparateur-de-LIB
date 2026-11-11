@@ -54,9 +54,12 @@ class MainWindow(QMainWindow):
         for i, side in enumerate(self.sides.values()):
             side.button.clicked.connect(lambda _=False, s=side.side: self.choose(s))
             side.modes.currentIndexChanged.connect(lambda _=0, s=side.side: self._mode_changed(s))
-            bar.addWidget(side.button)
-            bar.addWidget(side.modes)
-            bar.addStretch(1)
+            half = QHBoxLayout()  # chaque côté occupe sa moitié, au-dessus de son panneau
+            half.setSpacing(8)
+            half.addWidget(side.button)
+            half.addWidget(side.modes)
+            half.addStretch(1)
+            bar.addLayout(half, 1)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -92,7 +95,7 @@ class MainWindow(QMainWindow):
         """Pose un fixture déjà chargé (ex. celui de l'atelier, avec ses modifications)."""
         s = self.sides[side]
         s.ft = ft
-        s.button.setText(f"{ft.manufacturer} - {ft.name}")
+        s.button.setText(f"{s.label} : {ft.manufacturer} - {ft.name}")
         s.button.setToolTip(tip)
         s.modes.blockSignals(True)
         s.modes.clear()

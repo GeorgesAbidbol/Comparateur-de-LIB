@@ -212,8 +212,8 @@ def plan_group(ft: FixtureType, geos: list[Geometry], model_name: str) -> _Plan:
 
     if ft.format != "gdtf":
         raise MoveError("regrouper n'est fait pour l'instant que sur un GDTF (pas encore sur un XML MA3)")
-    if len(geos) < 2:
-        raise MoveError("il faut au moins deux géométries identiques")
+    if not geos:
+        raise MoveError("aucune géométrie choisie")
     if not model_name or ft.geometry(model_name) is not None:
         raise MoveError(f"le nom de modèle « {model_name} » est vide ou déjà pris")
     for g in geos:
@@ -276,7 +276,8 @@ def plan_group(ft: FixtureType, geos: list[Geometry], model_name: str) -> _Plan:
     if not sets:
         raise MoveError("aucun canal sur ces géométries : rien à regrouper (3D seule ?)")
     bases = sets[0]
-    msg = (f"{len(geos)} géométries → modèle « {model_name} » + {len(geos)} références "
+    n = len(geos)
+    msg = (f"{n} géométrie{'s' if n > 1 else ''} → modèle « {model_name} » + {n} référence{'s' if n > 1 else ''} "
            f"(adresses {', '.join(str(b) for b in bases[:6])}{'…' if len(bases) > 6 else ''})")
     if len(sets) == 2:
         msg += " ; 2 jeux d'adresses selon le mode"
@@ -360,6 +361,166 @@ def group(ft: FixtureType, geos: list[Geometry], model_name: str) -> tuple[Fixtu
                     rel_el.remove(r)
                 seen.add(key)
     return restore(ft, ET.tostring(root_xml, encoding="utf-8")), plan.message
+
+
+def models(ft: FixtureType) -> list[str]:
+    """Modèles qu'une référence peut prendre : les géométries de premier niveau qui ne sont
+    la base d'aucun mode."""
+    roots = {m.geometry for m in ft.modes}
+    return [g.name for g in ft.geometries if g.name not in roots]
+
+
+def to_reference(ft: FixtureType, geos: list[Geometry], model_name: str) -> tuple[FixtureType, str]:
+    """Fait de `geos` des références vers un modèle qui existe déjà (Jo, 11/11/2026 : « je ne
+    peux pas choisir quelle géométrie référence appliquer »). Une référence change simplement
+    de modèle. Une géométrie doit porter les mêmes canaux que le modèle : ses canaux
+    disparaissent, le modèle les porte, les adresses DMX ne bougent pas. Tout est vérifié
+    avant d'écrire."""
+    from .diagnostic import _signature
+    from .remap import LINK_ATTRS
+
+    if ft.format != "gdtf":
+        raise MoveError("fait pour l'instant sur un GDTF seulement (pas encore sur un XML MA3)")
+    model = ft.top_level(model_name)
+    if model is None or not geos:
+        raise MoveError(f"modèle « {model_name} » introuvable")
+    for g in geos:
+        if g.parent is None:
+            raise MoveError(f"« {g.name} » est un modèle ou une base, pas une géométrie de l'arbre")
+        if _top(g) is model:
+            raise MoveError(f"« {g.name} » est dans le modèle « {model_name} » lui-même")
+    node = ft.xml_root.find("FixtureType")
+
+    if all(g.is_reference for g in geos):  # déjà des références : on change juste de modèle
+        for g in geos:
+            element_of(ft, g).set("Geometry", model_name)
+        return (restore(ft, ET.tostring(ft.xml_root, encoding="utf-8")),
+                f"{len(geos)} référence(s) → modèle « {model_name} »")
+    if any(g.is_reference for g in geos):
+        raise MoveError("choisis soit des géométries, soit des références, pas un mélange")
+
+    mtree = _subtree(model)
+    if any(x.is_reference for x in mtree):
+        raise MoveError(f"le modèle « {model_name} » contient une référence")
+    msig = _shape(_signature(model))
+    trees = [_subtree(g) for g in geos]
+    for g in geos:
+        if any(x.is_reference for x in g.walk()):
+            raise MoveError(f"« {g.name} » contient une référence : lance d'abord « Retirer la 3D »")
+        if _shape(_signature(g)) != msig:
+            raise MoveError(f"« {g.name} » n'a pas la même structure que le modèle « {model_name} » "
+                            "(types ou enfants différents)")
+
+    def sig(tree, mode):
+        index = {x.name: i for i, x in enumerate(tree)}
+        chans = [(index[c.geometry], c) for c in mode.channels if c.geometry in index]
+        real = [c.offset[0] for _, c in chans if c.offset]
+        base = min(real) if real else 1
+        brks = {c.dmx_break for _, c in chans if c.offset}
+        return (sorted((i, tuple(lc.attribute for lc in c.logical_channels),
+                        tuple(o - base for o in c.offset) if c.offset else None) for i, c in chans),
+                base, brks, chans)
+
+    offs: list[set[int]] = [set() for _ in geos]  # DMXOffset voulu pour chaque référence
+    moved: list[tuple] = []  # modes où le modèle n'a pas encore de canaux
+    dmx_break = None
+    renames: dict[str, str] = {}
+    for mode in ft.modes:
+        per = [sig(t, mode) for t in trees]
+        m_sig, m_base, m_brks, m_chans = sig(mtree, mode)
+        if not any(p[3] for p in per):
+            if m_chans and any(_top(g).name == mode.geometry for g in geos):
+                raise MoveError(f"mode « {mode.name} » : le modèle porte des canaux, pas ces géométries")
+            continue
+        if not all(p[3] for p in per) or any(p[0] != per[0][0] for p in per):
+            raise MoveError(f"mode « {mode.name} » : ces géométries n'ont pas toutes les mêmes canaux")
+        for s_, base, brks, chans in per:
+            if len(brks) > 1 or "Overwrite" in brks:
+                raise MoveError(f"mode « {mode.name} » : canaux sur plusieurs breaks, pas encore géré")
+            b = int(next(iter(brks))) if brks else None
+            if b is not None and dmx_break not in (None, b):
+                raise MoveError("breaks différents selon le mode, pas encore géré")
+            dmx_break = b if b is not None else dmx_break
+        if m_chans:
+            if per[0][0] != m_sig:
+                raise MoveError(f"mode « {mode.name} » : pas les mêmes canaux que le modèle "
+                                f"« {model_name} » (attributs ou écarts d'adresses différents)")
+            ints = {int(b) for b in m_brks if b != "Overwrite"}
+            if ints and dmx_break is not None and ints != {dmx_break}:
+                raise MoveError(f"mode « {mode.name} » : le modèle est sur un autre break")
+            for k, p in enumerate(per):
+                offs[k].add(p[1] - m_base + 1)
+        else:
+            moved.append((mode.name, [p[1] for p in per]))
+        for tree, p in zip(trees, per):
+            for i, c in p[3]:
+                renames[f"{tree[i].name}_{c.attribute}"] = f"{mtree[i].name}_{c.attribute}"
+    for k, g in enumerate(geos):
+        if not offs[k] and moved:
+            offs[k].add(moved[0][1][k])
+        if len(offs[k]) > 1:
+            raise MoveError(f"« {g.name} » : adresses différentes selon le mode ; sépare d'abord "
+                            "l'arbre avec « Une base par mode »")
+        if offs[k] and min(offs[k]) < 1:
+            raise MoveError(f"« {g.name} » : adresse impossible avec ce modèle")
+    final = [next(iter(o)) if o else 1 for o in offs]
+    for name, bases in moved:
+        if len({b - f for b, f in zip(bases, final)}) > 1 or bases[0] - final[0] < 0:
+            raise MoveError(f"mode « {name} » : écarts d'adresses différents entre ces géométries")
+
+    # écriture
+    all_names = {x.name: (k, i) for k, t in enumerate(trees) for i, x in enumerate(t)}
+    for g, off in zip(geos, final):
+        el, parent_el = element_of(ft, g), element_of(ft, g.parent)
+        ref = ET.Element("GeometryReference", {k: v for k, v in el.attrib.items()
+                                               if k in ("Name", "Position", "Model")})
+        ref.set("Geometry", model_name)
+        ET.SubElement(ref, "Break", {"DMXOffset": str(off), "DMXBreak": str(dmx_break or 1)})
+        ref.tail = el.tail
+        i = list(parent_el).index(el)
+        parent_el.remove(el)
+        parent_el.insert(i, ref)
+    moved_modes = {name for name, _ in moved}
+    for mode_el in node.iterfind("DMXModes/DMXMode"):
+        chans_el = mode_el.find("DMXChannels")
+        if chans_el is None:
+            continue
+        for ch in list(chans_el):
+            where = all_names.get(ch.get("Geometry", ""))
+            if where is None:
+                continue
+            k, i = where
+            if mode_el.get("Name") not in moved_modes or k:
+                chans_el.remove(ch)
+                continue
+            ch.set("Geometry", mtree[i].name)  # premier de la série : ses canaux passent au modèle
+            off = (ch.get("Offset") or "None").strip()
+            if off not in ("None", ""):
+                ch.set("Offset", ",".join(str(int(o) - final[0] + 1) for o in off.split(",")))
+        for el in mode_el.iter():
+            for key in LINK_ATTRS:
+                v = el.get(key)
+                if v and v.split(".")[0] in renames:
+                    segs = v.split(".")
+                    segs[0] = renames[segs[0]]
+                    el.set(key, ".".join(segs))
+        rel_el = mode_el.find("Relations")
+        if rel_el is not None:
+            seen = set()
+            for r in list(rel_el):
+                key = (r.get("Master"), r.get("Follower"), r.get("Type"))
+                if key in seen:
+                    rel_el.remove(r)
+                seen.add(key)
+    msg = (f"{len(geos)} géométrie(s) → référence(s) du modèle « {model_name} » "
+           f"(adresses {', '.join(map(str, final[:6]))}{'…' if len(final) > 6 else ''})")
+    return restore(ft, ET.tostring(ft.xml_root, encoding="utf-8")), msg
+
+
+def _shape(signature: str) -> str:
+    """Empreinte sans le nom du modèle 3D : deux pixels restent pareils avec ou sans maillage."""
+    import re
+    return re.sub(r":[^:\[]*:", "::", signature)
 
 
 def suggested_model_name(ft: FixtureType, geos: list[Geometry]) -> str:

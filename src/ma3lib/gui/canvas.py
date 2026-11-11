@@ -138,19 +138,18 @@ class LinkCanvas(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.fillRect(self.rect(), theme.BG)
 
-        if not any(self.roots.values()):
-            p.setPen(theme.TEXT_DIM)
-            p.setFont(theme.font(12))
-            p.drawText(self.rect(), Qt.AlignCenter,
-                       "Glisse un GDTF ou un XML MA3 à gauche (source) et à droite (cible)")
-            return
-
-        for side, label in (("source", "Source"), ("cible", "Cible")):
+        # deux panneaux bien séparés : source à gauche, cible à droite (Jo, 11/11/2026)
+        half = self.width() / 2
+        for side, label, x in (("source", "Source", 8.0), ("cible", "Cible", half + 6)):
+            zone = QRectF(x, 4, half - 14, self.height() - 8)
+            p.setPen(Qt.NoPen)
+            p.setBrush(theme.PANEL)
+            p.drawRoundedRect(zone, 10, 10)
             if self.roots[side] is None:
-                x0, w = self._col(side)
                 p.setPen(theme.TEXT_DIM)
-                p.setFont(theme.font(11))
-                p.drawText(QRectF(x0, MARGIN, w, 200), Qt.AlignCenter, f"{label} : glisse un fichier ici")
+                p.setFont(theme.font(12))
+                p.drawText(QRectF(zone.x(), zone.y(), zone.width(), min(zone.height(), 420.0)),
+                           Qt.AlignCenter, f"{label}\n\nglisse un GDTF ou un XML MA3 ici")
 
         self._paint_links(p)
         for r in self._rows:

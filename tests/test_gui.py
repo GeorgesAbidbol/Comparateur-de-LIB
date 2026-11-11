@@ -196,3 +196,51 @@ def test_mini_grid_keeps_16_pixels_on_one_row(tmp_path):
     cols, rows, size = grid.layout()
     assert (cols, rows) == (16, 1) and cols * size <= 380
     grid.grab()
+
+
+def test_params_panel_makes_references_and_renames(bad_bar, monkeypatch):
+    """Jo, 11/11/2026 : choisir le modèle d'une référence, le créer s'il manque, renommer."""
+    from PySide6.QtWidgets import QApplication, QInputDialog
+    from ma3lib import compare
+    from ma3lib.gui import atelier
+
+    def sig(ft):
+        return [(i.ident, [(s.attribute, tuple(s.addresses)) for s in i.slots])
+                for i in compare.flatten(compare.instances(ft, ft.modes[0]))]
+
+    app = QApplication.instance() or QApplication([])
+    win = atelier.AtelierWindow()
+    win.load(str(bad_bar))
+    before = sig(win.ft)
+
+    def pick(*names):
+        win.tree.selection = [win.ft.geometry(n) for n in names]
+        win.tree.current = win.tree.selection[0]
+        win._select(win.tree.current)
+
+    # 1. le modèle n'existe pas : on le crée depuis le premier pixel
+    pick("Pixel1")
+    assert win.params.model.count() == 1 and not win.params.model.isEnabled()
+    win.params.kind.setCurrentText(atelier.REF)
+    assert win.params.model.currentText() == atelier.NEW_MODEL
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Pixel", True))
+    win.params.applied.emit()
+    assert win.ft.geometry("Pixel1").reference == "Pixel"
+    # 2. les autres pixels prennent le modèle qui existe maintenant
+    pick("Pixel2", "Pixel3", "Pixel4")
+    win.params.kind.setCurrentText(atelier.REF)
+    assert win.params.model.currentText() == "Pixel"
+    win.params.applied.emit()
+    assert [win.ft.geometry(f"Pixel{i}").breaks[0].dmx_offset for i in range(1, 5)] == [1, 4, 7, 10]
+    assert sig(win.ft) == before  # mêmes instances, mêmes adresses
+    # 3. renommer depuis le panneau
+    pick("Pixel3")
+    win.params.name.setText("Pix C")
+    win.params.applied.emit()
+    assert win.ft.geometry("Pix C") is not None and win.ft.geometry("Pixel3") is None
+    assert len(win.history) == 3
+    # 4. un modèle qui ne colle pas est refusé sans rien abîmer
+    pick("Pixel2")
+    with __import__("pytest").raises(atelier.geotree.MoveError):
+        atelier.geotree.to_reference(win.ft, [win.ft.geometry("Body")], "Pixel")
+    win.close()

@@ -2,7 +2,7 @@
 
 L'arbre complet des géométries d'un mode, avec ce que le diagnostic de l'étape 1 y trouve
 (géométries 3D seules, modèles en double), et le panneau des paramètres de la géométrie
-choisie (adresse, grille, type ; encore en lecture seule).
+choisie (nom, type, modèle de référence, adresse, grille ; bouton « Appliquer »).
 
 Glisser-déposer : lâcher sur le milieu d'une ligne = la géométrie devient son enfant,
 sur le haut ou le bas = avant ou après elle. Ctrl/Maj pour en prendre plusieurs.
@@ -386,22 +386,33 @@ class MiniGrid(QWidget):
             p.drawRect(QRectF(x0 + cell[0] * size, y0 + cell[1] * size, size - gap, size - gap))
 
 
+NEW_MODEL = "Nouveau modèle…"
+REF = "GeometryReference"
+
+
 class Params(QWidget):
-    """Paramètres de la géométrie choisie : nom, type, modèle, adresse, grille (maquette)."""
+    """Paramètres de la géométrie choisie : nom, type, modèle de référence, adresse, grille.
+    « Appliquer » écrit ce qui a changé (signal `applied`)."""
+
+    applied = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.geo: Optional[Geometry] = None
+        self.place = (0, 0)
         self.title = QLabel()
         self.title.setFont(theme.font(12, True))
         self.name = QLineEdit()
+        self.name.returnPressed.connect(lambda: self.applied.emit())
         self.kind = QComboBox()
-        self.kind.addItems(TYPES)
-        self.model = QLabel()
-        self.model.setObjectName("dim")
+        self.kind.currentTextChanged.connect(self._kind_changed)
+        self.model = QComboBox()
+        self.model.setToolTip("Le modèle que la référence répète. « Nouveau modèle… » le crée "
+                              "à partir de cette géométrie.")
         self.address = QSpinBox()
         self.address.setRange(1, 512)
-        self.brk = QSpinBox()
-        self.brk.setRange(1, 8)
+        self.brk = QLabel()
+        self.brk.setObjectName("dim")
         self.gx, self.gy = QSpinBox(), QSpinBox()
         for s in (self.gx, self.gy):
             s.setRange(0, 999)
@@ -409,6 +420,9 @@ class Params(QWidget):
         self.note = QLabel()
         self.note.setWordWrap(True)
         self.note.setObjectName("dim")
+        self.button = QPushButton("Appliquer")
+        self.button.setFont(theme.font(10, True))
+        self.button.clicked.connect(lambda: self.applied.emit())
 
         form = QFormLayout()
         form.setVerticalSpacing(10)
@@ -418,7 +432,6 @@ class Params(QWidget):
         addr = QHBoxLayout()
         addr.addWidget(self.address, 2)
         addr.addSpacing(8)
-        addr.addWidget(QLabel("Break"))
         addr.addWidget(self.brk, 1)
         form.addRow("Adresse", addr)
         grid = QHBoxLayout()
@@ -434,31 +447,61 @@ class Params(QWidget):
         lay.setSpacing(12)
         lay.addWidget(self.title)
         lay.addLayout(form)
+        lay.addWidget(self.button, 0, Qt.AlignRight)
         lay.addWidget(self.grid)
         lay.addWidget(self.note)
         lay.addStretch(1)
         self.setStyleSheet(f"QLineEdit, QSpinBox {{ background: {theme.ROW.name()}; border: none;"
-                           f" border-radius: 6px; padding: 6px 10px; }}")
+                           f" border-radius: 6px; padding: 6px 10px; }}"
+                           f"QSpinBox:disabled {{ color: {theme.TEXT_DIM.name()}; }}")
 
-    def show_geo(self, g: Optional[Geometry], flag_3d: bool, ident: str = "", ft=None) -> None:
+    def _kind_changed(self, kind: str) -> None:
+        self.model.setEnabled(kind == REF)
+        if kind == REF and self.model.currentIndex() < 0:
+            self.model.setCurrentIndex(0)
+
+    def show_geo(self, g: Optional[Geometry], flag_3d: bool, ident: str = "", ft=None,
+                 models: Optional[list[str]] = None, count: int = 1) -> None:
         if g is None:
             return
-        self.title.setText(f"{ident}   {g.name}" if ident else g.name)
+        self.geo = g
+        title = f"{ident}   {g.name}" if ident else g.name
+        self.title.setText(title + (f"   (+{count - 1})" if count > 1 else ""))
         self.name.setText(g.name)
-        self.kind.setCurrentText(g.kind if g.kind in TYPES else "Geometry")
-        self.model.setText(g.reference or g.model or "—")
+        for w in (self.kind, self.model):
+            w.blockSignals(True)
+            w.clear()
+        self.kind.addItems([REF] + [k for k in geotree.EDITABLE_KINDS if k != REF])
+        self.kind.setCurrentText(g.kind)
+        self.model.addItems([m for m in (models or []) if m != g.name] + [NEW_MODEL])
+        self.model.setCurrentIndex(self.model.findText(g.reference) if g.is_reference else -1)
+        for w in (self.kind, self.model):
+            w.blockSignals(False)
+        self.kind.setEnabled(g.parent is not None)  # un modèle ne devient pas une référence
+        self.model.setEnabled(g.is_reference)
         b = g.breaks[0] if g.breaks else None
-        for w in (self.address, self.brk):
-            w.setEnabled(b is not None)
-        if b:
-            self.address.setValue(b.dmx_offset)
-            self.brk.setValue(b.dmx_break)
-        x, y = grid_place(g, ft)
-        self.gx.setValue(x)
-        self.gy.setValue(y)
+        self.address.setEnabled(b is not None)
+        self.address.setValue(b.dmx_offset if b else 1)
+        self.brk.setText(f"Break {b.dmx_break}" if b else ("sans adresse" if g.is_reference else "portée par les canaux"))
+        self.place = grid_place(g, ft)
+        self.gx.setValue(self.place[0])
+        self.gy.setValue(self.place[1])
         self.grid.set(g, ft)
         self.note.setText("Aucun canal dans aucun mode : sert seulement à la 3D, le nettoyeur "
                           "la retirera." if flag_3d else "")
+
+    def edit(self) -> "geotree.Edit":
+        """Ce qui a changé dans les champs simples (nom, type, adresse, grille)."""
+        g, e = self.geo, geotree.Edit()
+        if self.name.text().strip() != g.name:
+            e.name = self.name.text().strip()
+        if not g.is_reference and self.kind.currentText() not in (g.kind, REF):
+            e.kind = self.kind.currentText()
+        if g.is_reference and g.breaks and self.address.value() != g.breaks[0].dmx_offset:
+            e.breaks = [self.address.value()] + [b.dmx_offset for b in g.breaks[1:]]
+        if (self.gx.value(), self.gy.value()) != self.place:
+            e.grid = (self.gx.value(), self.gy.value())
+        return e
 
 
 class DuplicateDialog(QDialog):
@@ -628,6 +671,7 @@ class AtelierWindow(QMainWindow):
         scroll.setWidget(self.tree)
         self.params = Params()
         self.params.setFixedWidth(400)
+        self.params.applied.connect(self._apply_params)
         mid = QHBoxLayout()
         mid.setSpacing(0)
         mid.addWidget(scroll, 1)
@@ -788,8 +832,8 @@ class AtelierWindow(QMainWindow):
     def _menu(self, where) -> None:
         sel = list(self.tree.selection)
         menu = QMenu(self)
-        if len(sel) >= 2 and all(g.parent is not None and not g.is_reference for g in sel):
-            menu.addAction(f"Regrouper en modèle + {len(sel)} références…", lambda: self._group(sel))
+        if sel and all(g.parent is not None and not g.is_reference for g in sel):
+            menu.addAction(f"Regrouper en modèle + {len(sel)} référence(s)…", lambda: self._group(sel))
         elif len(sel) == 1 and sel[0].name in self.copies:
             same = next(gr for gr in diagnostic.find_instance_groups(self.ft) if sel[0].name in gr.names)
             geos = [self.ft.geometry(n) for n in same.names]
@@ -853,7 +897,49 @@ class AtelierWindow(QMainWindow):
 
     def _select(self, g) -> None:
         self.params.show_geo(g, g is not None and g.name in self.useless,
-                             self.tree.idents.get(g.name, "") if g is not None else "", self.ft)
+                             self.tree.idents.get(g.name, "") if g is not None else "", self.ft,
+                             geotree.models(self.ft) if self.ft else [], len(self.tree.selection))
+
+    def _apply_params(self) -> None:
+        """Bouton « Appliquer » du panneau : référence (modèle choisi ou créé), puis nom, type,
+        adresse, grille. Une seule annulation pour le tout."""
+        p, g = self.params, self.params.geo
+        if self.ft is None or g is None:
+            return
+        sel = [x for x in self.tree.selection if x.parent is not None] or [g]
+        if not any(x is g for x in sel):
+            sel = [g]
+        edit, kind, model = p.edit(), p.kind.currentText(), p.model.currentText()
+        before, done = geotree.snapshot(self.ft), []
+        try:
+            if kind == REF and model == NEW_MODEL:
+                if any(x.is_reference for x in sel):
+                    raise geotree.MoveError("c'est déjà une référence : choisis un modèle de la liste")
+                name, ok = QInputDialog.getText(self, "Nouveau modèle", "Nom du modèle :",
+                                                text=geotree.suggested_model_name(self.ft, sel))
+                if not ok:
+                    return
+                self.ft, msg = geotree.group(self.ft, sel, name.strip())
+                done.append(msg)
+            elif kind == REF and model and (not g.is_reference or model != g.reference):
+                self.ft, msg = geotree.to_reference(self.ft, sel, model)
+                done.append(msg)
+            elif kind != REF and g.is_reference:
+                raise geotree.MoveError("une référence ne redevient pas une géométrie ici : Ctrl+Z, "
+                                        "ou change le type de son modèle")
+            edit.kind = None if done else edit.kind
+            if any(v is not None for v in vars(edit).values()):
+                self.ft, msg = geotree.apply_edit(self.ft, self.ft.geometry(g.name), edit)
+                done.append(msg)
+        except geotree.MoveError as exc:
+            self.ft = geotree.restore(self.ft, before) if done else self.ft
+            self._after_change(f"Impossible : {exc}")
+            return
+        if not done:
+            self.status.setText("Rien à changer")
+            return
+        self.history.append(before)
+        self._after_change("   ·   ".join(done) + "   ·   Ctrl+Z pour annuler")
 
 
 def main(argv: list[str] | None = None) -> int:
