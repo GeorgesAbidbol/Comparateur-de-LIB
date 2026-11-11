@@ -3,10 +3,7 @@ name: Installeur Windows
 # Fabrique « Banane-Pot-Setup-v<version>.exe » (exe + raccourci sur le bureau) sur une machine
 # Windows, parce qu'un exe Windows ne se fabrique pas depuis Linux.
 on:
-  workflow_dispatch:
-  push:
-    branches: [main, "claude/project-thread-n9qj5m"]
-    paths: ["src/**", "tests/**", "packaging/**", "pyproject.toml", ".github/workflows/windows.yml"]
+  workflow_dispatch:  # à la main seulement : Jo veut finir l'appli avant de faire l'exe (11/11/2026)
 
 permissions:
   contents: read
