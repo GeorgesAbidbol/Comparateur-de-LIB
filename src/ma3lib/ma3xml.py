@@ -607,7 +607,9 @@ def _channel_function(ctx: _Ctx, cf: ET.Element, parent: ET.Element, virtual: bo
     pf, pt = _num(cf.get("PhysicalFrom"), 0.0), _num(cf.get("PhysicalTo"), 1.0)
     unit = ctx.units.get(attrs["Attribute"] or "", "")
     scale = math.pi / 180 if unit == "AngularSpeed" else 1.0  # la console stocke des rad/s
-    pf, pt = pf * scale, pt * scale
+    # physique absente du GDTF : valeurs d'usage de la console (0 à 1), sans conversion d'unité
+    pf = pf * scale if cf.get("PhysicalFrom") is not None else pf
+    pt = pt * scale if cf.get("PhysicalTo") is not None else pt
     if cf.get("Wheel") and unit in ("", "None"):
         # index de roue : la console compte en emplacements (0 … nombre de slots)
         pf, pt = 0.0, float(ctx.slots.get(cf.get("Wheel", ""), 1))

@@ -740,9 +740,6 @@ def construire(projet: Projet) -> FixtureType:
                 if lo is not None and hi is not None and not index:
                     cf.set("PhysicalFrom", _num(lo))
                     cf.set("PhysicalTo", _num(hi))
-                else:
-                    cf.set("PhysicalFrom", "0")
-                    cf.set("PhysicalTo", "1")
                 if wheel in wheels and roue_de(f["attr"]) == wheel:
                     cf.set("Wheel", wheel)
                 if f["attr"] in emitter_of:
