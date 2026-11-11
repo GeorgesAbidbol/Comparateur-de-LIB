@@ -229,10 +229,10 @@ def test_split_per_mode_itetra_style(tmp_path):
     before = {m.name: sig(ft, m) for m in ft.modes}
     ft2, msg = geotree.split_per_mode(ft)
     assert msg.startswith("1 base")
-    assert [m.geometry for m in ft2.modes] == ["Base", "Base M2"]
-    assert [[b.dmx_offset for b in g.breaks] for g in ft2.top_level("Base").children] == [[2], [6], [10]]
-    assert [[b.dmx_offset for b in g.breaks] for g in ft2.top_level("Base M2").children] == [[2], [5], [8]]
+    assert [m.geometry for m in ft2.modes] == ["Base RGBW", "Base RGB"]
+    assert [[b.dmx_offset for b in g.breaks] for g in ft2.top_level("Base RGBW").children] == [[2], [6], [10]]
+    assert [[b.dmx_offset for b in g.breaks] for g in ft2.top_level("Base RGB").children] == [[2], [5], [8]]
     assert {m.name: sig(ft2, m) for m in ft2.modes} == before
     rel2 = ft2.xml_root.findall(".//DMXMode")[1].find("Relations/Relation")
-    assert rel2.get("Master") == "Base M2_Dimmer" and rel2.get("Follower").startswith("Px_ColorAdd_R")
+    assert rel2.get("Master") == "Base RGB_Dimmer" and rel2.get("Follower").startswith("Px_ColorAdd_R")
     assert geotree.split_per_mode(ft2)[1].startswith("Chaque mode")

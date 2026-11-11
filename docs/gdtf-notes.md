@@ -139,7 +139,8 @@ mêmes modèles de référence d'un mode à l'autre. Cette règle remplace « un
 tous les modes » ; elle garde « on réutilise les mêmes modèles ».
 
 Atelier : bouton « Une base par mode » (`geotree.split_per_mode`, GDTF). Le premier mode
-garde l'arbre d'origine, les autres reçoivent une copie suffixée `M<n° du mode>` ; chaque
+garde l'arbre d'origine, les autres reçoivent une copie ; toutes les géométries prennent en
+suffixe le nom du mode donné par le fabricant (`Base Mode 3-Pixel RGB`, choix de Jo) ; chaque
 référence ne garde que les Breaks de son mode ; canaux, liens et adresses suivent. Un fixture
 sans sous-instance (Esprite) garde sa base unique. Ensuite « Retirer la 3D » élague chaque
 base selon son mode.

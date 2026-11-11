@@ -822,8 +822,8 @@ def shared_trees(ft: FixtureType) -> dict[str, list[str]]:
 
 
 def split_per_mode(ft: FixtureType) -> tuple[FixtureType, str]:
-    """Donne à chaque mode sa propre base. Le premier mode garde l'arbre d'origine, les autres
-    reçoivent une copie suffixée « M<n° du mode> ». Chaque référence ne garde que les Breaks
+    """Donne à chaque mode sa propre base : l'arbre d'origine pour le premier mode, une copie
+    pour les autres, chaque géométrie suffixée du nom du mode (« Base Mode 3-Pixel RGB »). Chaque référence ne garde que les Breaks
     que son mode utilise. Les canaux, liens et adresses suivent : rien ne bouge sur la console."""
     import copy
     if ft.format != "gdtf":
@@ -843,29 +843,27 @@ def split_per_mode(ft: FixtureType) -> tuple[FixtureType, str]:
         pristine = copy.deepcopy(root_el)  # l'original est élagué pour le premier mode
         for k, mode_name in enumerate(mode_names):
             mode = ft.mode(mode_name)
-            n = ft.modes.index(mode) + 1
+            suffix = mode_name.replace(".", "_").strip()  # nom du mode donné par le fabricant
             el = root_el if k == 0 else copy.deepcopy(pristine)
             renames: dict[str, str] = {}
             # Breaks : chaque référence ne garde que ceux du mode (repérés sur l'arbre d'origine)
             for g, ge in zip(root.walk(), (e for e in el.iter() if e.tag in GEOMETRY_TAGS)):
-                if k:
-                    new = f"{g.name} M{n}"
-                    while new in taken:
-                        new += "'"
-                    taken.add(new)
-                    renames[g.name] = new
-                    ge.set("Name", new)
+                new = f"{g.name} {suffix}"
+                while new in taken:
+                    new += "'"
+                taken.add(new)
+                renames[g.name] = new
+                ge.set("Name", new)
                 if g.is_reference and len(g.breaks) > 1:
                     keep = _used_breaks(ft, mode, g)
                     if keep:
                         for i, b in reversed(list(enumerate(ge.findall("Break")))):
                             if i not in keep:
                                 ge.remove(b)
-            if not k:
-                continue
-            index += 1
-            geos_el.insert(index, el)
-            created += 1
+            if k:
+                index += 1
+                geos_el.insert(index, el)
+                created += 1
             mel = mode_els[mode_name]
             mel.set("Geometry", renames[root_name])
             chan_renames = {}
