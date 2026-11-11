@@ -581,6 +581,8 @@ class EditDialog(QDialog):
 
 
 class AtelierWindow(QMainWindow):
+    compareAsked = Signal(str)  # « source » ou « cible » : l'appli pose le fixture dans le comparateur
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(TITLE)
@@ -631,6 +633,13 @@ class AtelierWindow(QMainWindow):
         self.strip_button.setToolTip("Supprime toutes les géométries sans canal (Beams, câblage, références"
                                      " 3D), dans tous les modes. Les adresses ne bougent pas. Ctrl+Z annule.")
         self.strip_button.clicked.connect(self.strip_3d)
+        self.compare_button = QPushButton("Comparer")
+        self.compare_button.setEnabled(False)
+        self.compare_button.setToolTip("Envoie ce fixture, avec ses modifications, dans le comparateur")
+        compare_menu = QMenu(self.compare_button)
+        compare_menu.addAction("comme source (à gauche)", lambda: self.compareAsked.emit("source"))
+        compare_menu.addAction("comme cible (à droite)", lambda: self.compareAsked.emit("cible"))
+        self.compare_button.setMenu(compare_menu)
         self.export_button = QPushButton("Exporter…")
         self.export_button.setEnabled(False)
         self.export_button.setToolTip("Enregistrer en XML MA3 2.3.2.0 (onPC, clé USB ou dossier)")
@@ -642,6 +651,7 @@ class AtelierWindow(QMainWindow):
         foot.addWidget(self.status, 1)
         foot.addWidget(self.split_button)
         foot.addWidget(self.strip_button)
+        foot.addWidget(self.compare_button)
         foot.addWidget(self.export_button)
 
         central = QWidget()
@@ -673,6 +683,7 @@ class AtelierWindow(QMainWindow):
         self.modes.setEnabled(True)
         self.modes.blockSignals(False)
         self.export_button.setEnabled(True)
+        self.compare_button.setEnabled(True)
         self._mode_changed()
 
     def split_per_mode(self) -> None:

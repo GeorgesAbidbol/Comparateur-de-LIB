@@ -36,6 +36,7 @@ class AppWindow(QMainWindow):
         self.resize(1360, 880)
         self.atelier = AtelierWindow()
         self.comparateur = MainWindow()
+        self.atelier.compareAsked.connect(self.compare)
         self.sections = [("Atelier", self.atelier), ("Comparateur", self.comparateur)]
 
         self.stack = QStackedWidget()
@@ -74,6 +75,14 @@ class AppWindow(QMainWindow):
         lay.addWidget(self.stack, 1)
         self.setCentralWidget(central)
         self.setStyleSheet(NAV_STYLE)
+
+    def compare(self, side: str) -> None:
+        """Le fixture de l'atelier (modifications comprises) part dans le comparateur."""
+        if self.atelier.ft is None:
+            return
+        self.comparateur.set_fixture(side, self.atelier.ft, self.atelier.modes.currentText(),
+                                     "depuis l'atelier")
+        self.show_section("Comparateur")
 
     def show_section(self, label: str) -> None:
         for i, (name, _) in enumerate(self.sections):

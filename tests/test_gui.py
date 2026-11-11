@@ -161,3 +161,16 @@ def test_single_app_with_sections(good_bar):
     win.comparateur.load("source", str(good_bar))
     win.show_section("Atelier")
     assert win.stack.currentIndex() == 0 and win.atelier.ft.name == "GoodBar"
+
+
+def test_atelier_sends_fixture_to_comparator(bad_bar, good_bar):
+    from PySide6.QtWidgets import QApplication
+    from ma3lib.gui.app import AppWindow
+    app = QApplication.instance() or QApplication([])
+    win = AppWindow()
+    win.atelier.load(str(good_bar))
+    win.atelier.strip_3d()
+    win.atelier.compareAsked.emit("cible")
+    assert win.stack.currentWidget() is win.comparateur
+    assert win.comparateur.sides["cible"].ft is win.atelier.ft
+    assert win.comparateur.canvas.counts()[1] > 0

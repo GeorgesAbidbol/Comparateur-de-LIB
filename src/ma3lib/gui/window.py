@@ -86,10 +86,14 @@ class MainWindow(QMainWindow):
         except (gdtf.GdtfError, OSError) as exc:
             QMessageBox.warning(self, "Fichier illisible", str(exc))
             return
+        self.set_fixture(side, ft, mode, str(Path(path)))
+
+    def set_fixture(self, side: str, ft: FixtureType, mode: str = "", tip: str = "") -> None:
+        """Pose un fixture déjà chargé (ex. celui de l'atelier, avec ses modifications)."""
         s = self.sides[side]
         s.ft = ft
         s.button.setText(f"{ft.manufacturer} - {ft.name}")
-        s.button.setToolTip(str(Path(path)))
+        s.button.setToolTip(tip)
         s.modes.blockSignals(True)
         s.modes.clear()
         s.modes.addItems([m.name for m in ft.modes])
