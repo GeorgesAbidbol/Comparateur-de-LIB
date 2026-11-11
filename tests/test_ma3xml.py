@@ -112,3 +112,10 @@ def test_cli_export(good_bar, tmp_path, capsys):
     assert (tmp_path / "Test@GoodBar.xml").exists()
     assert cli.main(["export", str(good_bar), "--dossier", str(tmp_path)]) == 1  # existe déjà
     assert cli.main(["export", str(good_bar), "--dossier", str(tmp_path), "--remplacer"]) == 0
+
+
+def test_overwrite_with_single_break_becomes_break_number(good_bar):
+    """onPC 2.3.2.0 (iTetra2 TEST, 11/11/2026) : Overwrite + un seul Break = pixels au même endroit."""
+    ft = gdtf.load(good_bar)  # canaux du Pixel en DMXBreak="Overwrite", un Break par référence
+    node = ma3xml.convert(ft).find("FixtureType")
+    assert all("DMXBreak" not in c.attrib for c in node.iter("DMXChannel"))

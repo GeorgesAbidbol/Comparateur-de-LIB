@@ -632,8 +632,38 @@ def _channel_function(ctx: _Ctx, cf: ET.Element, parent: ET.Element, virtual: bo
             e.append(_copy(sub))
 
 
+def _single_breaks(geos: Optional[ET.Element], root_name: str) -> dict[str, str]:
+    """Géométries de modèle dont toutes les références (dans l'arbre du mode) n'ont qu'un Break :
+    {nom: DMXBreak de ce Break}. Vu sur onPC 2.3.2.0 (iTetra2, 11/11/2026) : avec un seul Break,
+    un canal en DMXBreak="Overwrite" ne prend pas l'adresse de la référence et tous les pixels
+    tombent au même endroit. On écrit alors le numéro du Break."""
+    if geos is None:
+        return {}
+    tops = {g.get("Name"): g for g in geos if g.tag in GEOMETRY_TAGS}
+    seen: dict[str, set] = {}
+    todo, done = [root_name], set()
+    while todo:
+        name = todo.pop()
+        if name in done or name not in tops:
+            continue
+        done.add(name)
+        for r in tops[name].iter("GeometryReference"):
+            target = r.get("Geometry", "")
+            brs = r.findall("Break")
+            seen.setdefault(target, set()).add(brs[0].get("DMXBreak", "1") if len(brs) == 1 else None)
+            todo.append(target)
+    out: dict[str, str] = {}
+    for target, kinds in seen.items():
+        if len(kinds) == 1 and None not in kinds and target in tops:
+            for g in tops[target].iter():
+                if g.tag in GEOMETRY_TAGS:
+                    out[g.get("Name", "")] = next(iter(kinds))
+    return out
+
+
 def _dmx_mode(ctx: _Ctx, m: ET.Element, paths: dict[str, str], out: ET.Element,
-              personality: bool) -> None:
+              personality: bool, geos: Optional[ET.Element] = None) -> None:
+    single = _single_breaks(geos, m.get("Geometry", ""))
     me = _el(out, "DMXMode", {"Name": m.get("Name"), "Geometry": m.get("Geometry"), "XYZ": "No", "DiveInto": "Yes"})
     chs = _el(me, "DMXChannels")
     for ch in m.iterfind("DMXChannels/DMXChannel"):
@@ -641,8 +671,11 @@ def _dmx_mode(ctx: _Ctx, m: ET.Element, paths: dict[str, str], out: ET.Element,
         offs = [o for o in (ch.get("Offset") or "").split(",") if o.strip() and o.strip() != "None"]
         for key, o in zip(("Coarse", "Fine", "Ultra", "Uber"), offs):
             attrs[key] = o.strip()
-        if ch.get("DMXBreak", "1") not in ("1", ""):
-            attrs["DMXBreak"] = ch.get("DMXBreak")
+        brk = ch.get("DMXBreak", "1")
+        if brk == "Overwrite" and ch.get("Geometry", "") in single:
+            brk = single[ch.get("Geometry", "")]
+        if brk not in ("1", ""):
+            attrs["DMXBreak"] = brk
         init = ch.get("InitialFunction") or ""
         if init:
             attrs["DefaultChannelFunction"] = ctx.link(init.split(".", 1)[1] if "." in init else init)
@@ -768,7 +801,7 @@ def convert(ft: FixtureType, files: Optional[dict[str, bytes]] = None, name: Opt
     with_personality = _protocols(src.find("Protocols"), pr_tmp)
     modes = _el(fte, "DMXModes")
     for m in src.iterfind("DMXModes/DMXMode"):
-        _dmx_mode(ctx, m, paths, modes, m.get("Name") in with_personality)
+        _dmx_mode(ctx, m, paths, modes, m.get("Name") in with_personality, src.find("Geometries"))
     revs = _el(fte, "Revisions")
     for r in src.iterfind("Revisions/Revision"):
         _el(revs, "Revision", {"Text": r.get("Text") or None, "Date": _date(r.get("Date", "")),
