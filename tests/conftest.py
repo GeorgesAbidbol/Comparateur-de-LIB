@@ -91,3 +91,23 @@ def tricky(tmp_path):
              f'<DMXMode Name="M2" Geometry="Head Mode 2"><DMXChannels>{channel("Head Mode 2", "Dimmer", 1)}'
              f'{channel("Lens2", "Shutter1", 2)}</DMXChannels></DMXMode>')
     return write_gdtf(tmp_path / "Test@Tricky.gdtf", fixture_xml("Tricky", geos, modes))
+
+
+@pytest.fixture(autouse=True)
+def _qt_cleanup():
+    """Détruit les fenêtres Qt à la fin de chaque test : sinon Python les libère dans le
+    désordre à la sortie et le processus plante (code de sortie non nul malgré les tests verts)."""
+    yield
+    try:
+        from PySide6.QtCore import QCoreApplication, QEvent
+        from PySide6.QtWidgets import QApplication
+    except ImportError:
+        return
+    app = QApplication.instance()
+    if app is None:
+        return
+    for w in app.topLevelWidgets():
+        w.close()
+        w.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    app.processEvents()
