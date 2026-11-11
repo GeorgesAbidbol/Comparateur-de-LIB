@@ -45,8 +45,17 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
    - « Créer le fixture » fabrique un vrai GDTF en mémoire (`creation.construire`) et l'ouvre dans
      l'atelier : arbre de géométries, puis export XML MA3 comme pour n'importe quel fixture.
    - Le projet en cours s'enregistre en `.bpot.json` pour être repris.
-   Reste : notices sans tableau tracé (texte seul), roues (gobos, couleurs) reliées aux plages,
-   plusieurs fonctions par canal (ModeMaster), test d'import onPC d'un fixture créé.
+   - « Tout récupérer » (Jo, 11/11/2026, après l'import du Muse dans onPC) : émetteurs LED et filtres
+     CMY reliés aux canaux, espace couleur, valeurs physiques (pan/tilt/zoom d'après le texte de la
+     notice, degrés / kelvins / % lus dans les plages), canal découpé en fonctions (Shutter1Strobe,
+     Color1WheelSpin, IrisPulseClose…), roues de couleurs et de gobos avec emplacements reliés aux
+     plages, lectures multiples d'un canal (ModeMaster : indexation ou rotation selon un autre
+     canal), tableaux annexes (« Control Channel », « Virtual colors ») rattachés à leur canal.
+     Les couleurs des émetteurs et des emplacements sont des valeurs TYPIQUES (`creation.EMETTEURS`,
+     `creation.COULEURS`) : les notices ne donnent pas de mesures.
+   Reste : notices sans tableau tracé (texte seul), images de gobos, fréquences de strobe quand la
+   notice ne les donne pas, gélatines par catégorie (Muse : 11 tableaux), poids / puissance,
+   test d'import onPC.
 
 ## Points à vérifier sur le matériel de Jo
 

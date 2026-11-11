@@ -123,6 +123,10 @@ Section **Créer** de l'appli. Deux façons de partir, qui se combinent :
   un nom de géométrie (ex. `Pixel`) et un nombre de **copies** : on obtient un modèle + N
   références aux adresses qui se suivent.
 
+Ce qui est repris de la notice ou déduit : émetteurs LED et filtres CMY, espace couleur, valeurs
+physiques (colonnes « Phys. »), fonctions par plage (strobe, pulse, rotation de roue…), roues de
+couleurs et de gobos. Les couleurs d'émetteurs et d'emplacements sont des valeurs typiques.
+
 « Créer le fixture → Atelier » ouvre le résultat dans l'atelier (géométries, puis « Exporter… »
 en XML MA3). « Enregistrer le projet… » garde la saisie (`.bpot.json`).
 Seules les chartes en tableaux tracés sont lues ; pour une notice mal lue, corriger dans le

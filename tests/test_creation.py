@@ -148,3 +148,117 @@ def test_lire_grilles_un_tableau_par_mode():
                                    table("Mode 2 (3 ch)", ["Red", "Green", "Blue"]),
                                    pdfchart.Grille([["Value", "Colour"], ["0", "Red"], ["2", "Green"], ["4", "Blue"]])])
     assert [(m.nom, len(m.canaux)) for m in modes] == [("Mode 1 (4 ch)", 4), ("Mode 2 (3 ch)", 3)]
+
+
+# ------------------------------------------------- physique, émetteurs, roues
+
+@pytest.mark.parametrize("texte,attr,attendu", [
+    ("Swivelling from -25° towards 0°", "Blade1Rot", (-25, 0)), ("0 degrees to +60 degrees", "ShaperRot", (0, 60)),
+    ("Linear from 2.200K to 15.000K", "CTC", (2200, 15000)), ("15.000k", "CTC", (15000, 15000)),
+    ("Dimmer intensity 0 – 100%", "Dimmer", (0, 1)), ("-99% to -1%", "Tint", (-0.99, -0.01)),
+    ("Open", "Shutter1", (1, 1)), ("Close", "Shutter1", (0, 0)), ("Max to min diameter", "Iris", (1, 0)),
+    ("Linear 0.000 to 0.735", "CIE_X", (0, 0.735)), ("Strobe 1 Hz to 25 Hz", "Shutter1Strobe", (1, 25)),
+    ("Macro 12", "ShaperMacros", None),
+])
+def test_physique(texte, attr, attendu):
+    assert creation.physique(texte, attr) == attendu
+
+
+@pytest.mark.parametrize("attr,texte,attendu", [
+    ("Shutter1", "Strobe from slow to fast", "Shutter1Strobe"), ("Shutter1", "Open", "Shutter1"),
+    ("Shutter1", "Pulse in from slow to fast", "Shutter1StrobePulseOpen"),
+    ("Shutter1", "Random from slow to fast", "Shutter1StrobeRandom"),
+    ("Color1", "Color Wheel Rotation Forward rainbow - Fast to slow", "Color1WheelSpin"),
+    ("Color1", "Color Slot Dark Red", "Color1"), ("Gobo1", "Gobo 3 shake slow to fast", "Gobo1SelectShake"),
+    ("Iris", "Random pulse closing slow to fast", "IrisRandomPulseClose"),
+    ("BeamShaperPos", "Ovalizer Rotation Ovalizer forward rotation fast to slow", "BeamShaperPosRotate"),
+    ("BeamShaperPos", "Ovalizer Indexing", "BeamShaperPos"),
+])
+def test_sous_attribut(attr, texte, attendu):
+    assert creation.sous_attribut(attr, texte) == attendu
+
+
+def _spot() -> Projet:
+    return Projet("Test", "Spot", "", [Mode("M", [
+        Canal(1, 2, "Pan", phys_de=-270, phys_a=270),
+        Canal(3, None, "Shutter", plages=[Plage(0, 9, "Closed"), Plage(10, 200, "Strobe 1 Hz to 25 Hz"),
+                                          Plage(201, 255, "Open")]),
+        Canal(4, None, "Red"), Canal(5, None, "Lime"),
+        Canal(6, None, "Color Wheel", plages=[
+            Plage(0, 9, "Open"), Plage(10, 19, "Red"), Plage(20, 29, "Open + Red"), Plage(30, 39, "Congo Blue"),
+            Plage(200, 255, "Rainbow slow to fast", "Rotation")]),
+        Canal(7, None, "Gobo", plages=[Plage(0, 9, "Open"), Plage(10, 19, "Gobo 1"), Plage(20, 29, "Gobo 2"),
+                                       Plage(100, 150, "Gobo 1 shake slow to fast")]),
+        Canal(8, None, "Ovalizer", plages=[Plage(0, 29, "Open"), Plage(30, 59, "Ovalizer Indexing (set next ch)"),
+                                           Plage(60, 89, "Ovalizer Rotation (set next ch)")]),
+        Canal(9, None, "Ovalizer Index/Rotation", plages=[
+            Plage(0, 255, "Ovalizer Indexing", "Ovalizer Indexing"),
+            Plage(0, 127, "Forward rotation fast to slow", "Ovalizer Rotation"),
+            Plage(128, 255, "Backwards rotation slow to fast", "Ovalizer Rotation")]),
+    ])])
+
+
+def test_emetteurs_roues_physique_dans_le_fixture(tmp_path):
+    projet = _spot()
+    ft = creation.construire(projet)
+    assert creation.emetteurs(projet) == ["Red", "Lime"]
+    assert creation.roues(projet) == {"ColorWheel 1": ["Open", "Red", "Congo Blue"],
+                                      "GoboWheel 1": ["Open", "Gobo 1", "Gobo 2"]}
+    x = ft.xml_root
+    assert [e.get("Name") for e in x.iter("Emitter")] == ["Red", "Lime"]
+    assert x.find(".//ColorSpace").get("Mode") == "sRGB"
+    assert [s.get("Name") for s in x.findall(".//Wheel[@Name='ColorWheel 1']/Slot")] == ["Open", "Red", "Congo Blue"]
+    fns = {cf.get("Name"): cf for cf in x.iter("ChannelFunction")}
+    assert (fns["Pan"].get("PhysicalFrom"), fns["Pan"].get("PhysicalTo")) == ("-270", "270")
+    strobe = fns["Strobe 1 Hz to 25 Hz"]
+    assert (strobe.get("Attribute"), strobe.get("DMXFrom"), strobe.get("PhysicalFrom"), strobe.get("PhysicalTo")) == (
+        "Shutter1Strobe", "10/1", "1", "25")
+    assert fns["Red"].get("Emitter") == "Red" and fns["Lime"].get("Emitter") == "Lime"
+    wheel = fns["Color Wheel"]
+    assert wheel.get("Wheel") == "ColorWheel 1"
+    assert [cs.get("WheelSlotIndex") for cs in wheel] == ["1", "2", None, "3"]
+    assert fns["Rainbow slow to fast"].get("Attribute") == "Color1WheelSpin"
+    assert fns["Gobo 1 shake slow to fast"].get("Attribute") == "Gobo1SelectShake"
+    index, rot = fns["Ovalizer Indexing"], fns["Ovalizer Rotation"]
+    assert (index.get("ModeMaster"), index.get("ModeFrom"), index.get("ModeTo")) == ("Head_BeamShaper", "30/1", "59/1")
+    assert (rot.get("Attribute"), rot.get("ModeFrom"), rot.get("ModeTo")) == ("BeamShaperPosRotate", "60/1", "89/1")
+    names = {a.get("Name"): a for a in x.iter("Attribute")}
+    assert names["Shutter1Strobe"].get("MainAttribute") == "Shutter1"
+    text = ma3xml.export(ft, tmp_path).read_text(encoding="utf-8-sig")
+    assert '<Emitter Name="Lime"' in text and 'Emitter="Red"' in text and "<ColorSpaceData" in text
+    assert 'WheelSlotIndex="2"' in text and 'ModeMaster="Head_BeamShaper"' in text
+    assert 'Attribute="Shutter1Strobe" OriginalAttribute="Shutter" DMXFrom="0A0A0A"' in text
+    assert Projet.from_json(projet.to_json()) == projet
+
+
+def test_lire_grilles_sections_annexe_et_valeur_fusionnee():
+    detail = pdfchart.Grille(HEAD + [
+        ["1", "1", "1", "Pan", "Pan movement", "0", "255", "128"],
+        ["2", "2", "2", "Zoom", "Zoom from min to max beam angle", "0", "255", "0"],
+        ["3", "3", "3", "Color Wheel", "Color Positioning", "", "", "0"],
+        [None, None, None, None, "Open", "0", "", None],
+        [None, None, None, None, "Open + Red", "1", "25", None],
+        [None, None, None, None, "Red", "2", "6", None],  # « 26 » coupé par le bord de colonne
+        [None, None, None, None, "Color Wheel Rotation", "", "", None],
+        [None, None, None, None, "Forward rainbow", "200", "255", None],
+        ["4", "4", "4", "Control", "No function", "0", "1", "0"],
+        [None, None, None, None, "(See full list)", "2", "3", None],
+        ["5", "5", "5", "Dimmer", "Dimmer intensity 0 – 100%", "0", "255", "0"],
+    ])
+    annexe = pdfchart.Grille([["Function", "", "From", "To", "Note"], ["NO FUNCTION", "", "0", "1", ""],
+                              ["PAN", "REVERSE ON", "2", "3", ""], [None, "REVERSE OFF", "4", "5", ""],
+                              ["RESET", "ALL", "200", "201", ""], [None, "ZOOM", "202", "203", ""]],
+                             title="Control Channel")
+    modes = pdfchart.lire_grilles([detail, annexe])
+    projet = Projet("T", "X", "", modes)
+    pdfchart.appliquer_faits(projet, "Pan movement range: 540°\n10°-60° zoom with 200mm lens")
+    raw = {c.nom: c for c in modes[2].canaux}
+    assert (raw["Pan"].phys_de, raw["Pan"].phys_a) == (-270, 270)
+    assert (raw["Zoom"].phys_de, raw["Zoom"].phys_a) == (10, 60)
+    assert (raw["Dimmer"].phys_de, raw["Dimmer"].phys_a) == (0, 1)
+    wheel = raw["Color Wheel"].plages
+    assert [(p.debut, p.fin, p.groupe, p.attribut) for p in wheel] == [
+        (0, 0, "Color Positioning", "Color1"), (1, 25, "Color Positioning", "Color1"),
+        (26, 26, "Color Positioning", "Color1"), (200, 255, "Color Wheel Rotation", "Color1WheelSpin")]
+    assert [p.nom for p in raw["Control"].plages] == ["NO FUNCTION", "PAN REVERSE ON", "PAN REVERSE OFF",
+                                                      "RESET ALL", "RESET ZOOM"]

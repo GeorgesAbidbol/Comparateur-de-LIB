@@ -19,8 +19,10 @@ from .. import attributs, creation
 from ..creation import Canal, Mode, Plage, Projet
 from . import theme
 
-COLS = ["Canal", "Fine", "Nom (notice)", "Attribut", "Géométrie", "Copies", "Défaut", "Plages"]
-C_ADDR, C_FINE, C_NAME, C_ATTR, C_GEO, C_COPIES, C_DEFAULT, C_RANGES = range(8)
+COLS = ["Canal", "Fine", "Nom (notice)", "Attribut", "Géométrie", "Copies", "Défaut", "Phys. 0", "Phys. 255",
+        "Plages"]
+C_ADDR, C_FINE, C_NAME, C_ATTR, C_GEO, C_COPIES, C_DEFAULT, C_PHYS0, C_PHYS1, C_RANGES = range(10)
+R_FROM, R_TO, R_NAME, R_ATTR, R_PHYS0, R_PHYS1 = range(6)
 TIPS = {
     C_FINE: "Adresse de l'octet Fine (16 bits). Vide = canal 8 bits.",
     C_ATTR: "Attribut grandMA3. Proposé d'après le nom ; tape pour chercher.",
@@ -28,6 +30,9 @@ TIPS = {
     C_COPIES: "Nombre d'instances identiques de cette géométrie (pixels, têtes…) : un modèle + N références,"
               " aux adresses qui se suivent. Saisis les canaux de la première seulement.",
     C_DEFAULT: "Valeur DMX par défaut (0 à 255).",
+    C_PHYS0: "Valeur physique à DMX 0 : degrés (pan, tilt, zoom, couteaux), kelvins (CCT), 0 à 1 (pourcentages)."
+             " Vide = 0. Pour un canal à plages, la physique se règle plage par plage.",
+    C_PHYS1: "Valeur physique à DMX 255. Vide = 1.",
     C_RANGES: "Nombre de plages nommées. Sélectionne le canal pour les voir à droite.",
 }
 
@@ -45,6 +50,17 @@ QPushButton#drop:hover {{ border-color: {theme.ACCENT.name()}; }}
 QPushButton#go {{ background: {theme.HEADER.name()}; font-weight: bold; }}
 QPushButton:disabled {{ color: {theme.TEXT_DIM.name()}; }}
 """
+
+
+def _show(v: Optional[float]) -> str:
+    return "" if v is None else f"{v:g}"
+
+
+def _float(text: str) -> Optional[float]:
+    try:
+        return float(text.replace(",", "."))
+    except ValueError:
+        return None
 
 
 def attribute_names() -> list[str]:
@@ -137,8 +153,8 @@ class CreerPage(QWidget):
         head = self.table.horizontalHeader()
         head.setSectionResizeMode(QHeaderView.Interactive)
         head.setSectionResizeMode(C_NAME, QHeaderView.Stretch)
-        for col, width in ((C_ADDR, 64), (C_FINE, 64), (C_ATTR, 190), (C_GEO, 130), (C_COPIES, 70),
-                           (C_DEFAULT, 70), (C_RANGES, 70)):
+        for col, width in ((C_ADDR, 58), (C_FINE, 52), (C_ATTR, 170), (C_GEO, 100), (C_COPIES, 62),
+                           (C_DEFAULT, 62), (C_PHYS0, 70), (C_PHYS1, 76), (C_RANGES, 62)):
             self.table.setColumnWidth(col, width)
         self.table.itemChanged.connect(self._cell_changed)
         self.table.itemSelectionChanged.connect(self._show_ranges)
@@ -158,12 +174,19 @@ class CreerPage(QWidget):
 
         self.ranges_title = QLabel("Plages du canal")
         self.ranges_title.setFont(theme.font(10, True))
-        self.ranges = QTableWidget(0, 3)
-        self.ranges.setHorizontalHeaderLabels(["De", "À", "Nom"])
+        self.ranges = QTableWidget(0, 6)
+        self.ranges.setHorizontalHeaderLabels(["De", "À", "Nom", "Fonction", "Phys. de", "Phys. à"])
+        self.ranges.horizontalHeaderItem(R_ATTR).setToolTip(
+            "Fonction précise de la plage (Shutter1Strobe, Color1WheelSpin…). Proposée d'après le texte ;"
+            " vide = l'attribut du canal. Des plages voisines de même fonction forment une seule fonction MA3.")
+        for col in (R_PHYS0, R_PHYS1):
+            self.ranges.horizontalHeaderItem(col).setToolTip(
+                "Valeur physique au début / à la fin de la plage (degrés, Hz, kelvins, 0 à 1).")
         self.ranges.verticalHeader().setVisible(False)
-        self.ranges.setColumnWidth(0, 56)
-        self.ranges.setColumnWidth(1, 56)
-        self.ranges.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.ranges.setItemDelegateForColumn(R_ATTR, _AttrDelegate(self.ranges))
+        for col, width in ((R_FROM, 46), (R_TO, 46), (R_ATTR, 150), (R_PHYS0, 66), (R_PHYS1, 66)):
+            self.ranges.setColumnWidth(col, width)
+        self.ranges.horizontalHeader().setSectionResizeMode(R_NAME, QHeaderView.Stretch)
         self.ranges.itemChanged.connect(self._range_changed)
         add_r = QPushButton("+ Plage")
         add_r.clicked.connect(self.add_range)
@@ -174,7 +197,7 @@ class CreerPage(QWidget):
         r_bar.addWidget(del_r)
         r_bar.addStretch(1)
         right_box = QWidget()
-        right_box.setFixedWidth(400)
+        right_box.setFixedWidth(560)
         right = QVBoxLayout(right_box)
         right.setContentsMargins(12, 0, 0, 0)
         right.addWidget(self.ranges_title)
@@ -354,10 +377,13 @@ class CreerPage(QWidget):
 
     def _fill_row(self, r: int, c: Canal) -> None:
         values = [str(c.adresse), str(c.fine) if c.fine else "", c.nom, c.attribut, c.geometrie,
-                  str(c.copies) if c.copies > 1 else "", str(c.defaut), str(len(c.plages)) if c.plages else ""]
+                  str(c.copies) if c.copies > 1 else "", str(c.defaut), _show(c.phys_de), _show(c.phys_a),
+                  str(len(c.plages)) if c.plages else ""]
         for col, text in enumerate(values):
             item = QTableWidgetItem(text)
-            if col in (C_ADDR, C_FINE, C_COPIES, C_DEFAULT, C_RANGES):
+            if col == C_NAME and c.description:
+                item.setToolTip(c.description)
+            if col in (C_ADDR, C_FINE, C_COPIES, C_DEFAULT, C_PHYS0, C_PHYS1, C_RANGES):
                 item.setTextAlignment(Qt.AlignCenter)
             if col == C_RANGES:
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
@@ -391,6 +417,9 @@ class CreerPage(QWidget):
                 creation.attribuer(self.mode)
         elif col == C_ATTR:
             c.attribut = text
+            for p in c.plages:  # les fonctions des plages suivent le nouvel attribut
+                p.attribut = ""
+            creation.detailler(self.mode)
         elif col == C_GEO:
             c.geometrie = text
             if not text:
@@ -406,6 +435,14 @@ class CreerPage(QWidget):
                 self.status.setText("Donne d'abord un nom de géométrie (ex. Pixel) aux canaux à multiplier.")
         elif col == C_DEFAULT and (v := number(0, 255)) is not None:
             c.defaut = v
+        elif col in (C_PHYS0, C_PHYS1) and (not text or _float(text) is not None):
+            if col == C_PHYS0:
+                c.phys_de = _float(text)
+            else:
+                c.phys_a = _float(text)
+            if (c.phys_de is None) != (c.phys_a is None):  # l'autre bout prend la valeur d'usage
+                c.phys_de = 0.0 if c.phys_de is None else c.phys_de
+                c.phys_a = 1.0 if c.phys_a is None else c.phys_a
         self._filling = True
         for row, canal in enumerate(self.mode.canaux):  # réaffiche (valeur refusée, copies partagées…)
             self._fill_row(row, canal)
@@ -437,7 +474,10 @@ class CreerPage(QWidget):
         rows = self._selected_rows() or list(range(len(self.mode.canaux)))
         for r in rows:
             self.mode.canaux[r].attribut = ""
+            for p in self.mode.canaux[r].plages:
+                p.attribut = ""
         creation.attribuer(self.mode)
+        creation.detailler(self.mode)
         self._fill()
 
     # ------------------------------------------------------------------ plages
@@ -454,9 +494,12 @@ class CreerPage(QWidget):
         if c is not None:
             self.ranges.setRowCount(len(c.plages))
             for r, p in enumerate(c.plages):
-                for col, text in enumerate((str(p.debut), str(p.fin), p.nom)):
+                attr = p.attribut if p.attribut and p.attribut != c.attribut else ""
+                for col, text in enumerate((str(p.debut), str(p.fin), p.nom, attr, _show(p.phys_de), _show(p.phys_a))):
                     item = QTableWidgetItem(text)
-                    if col < 2:
+                    if col == R_NAME and p.groupe:
+                        item.setToolTip(f"Section de la notice : {p.groupe}")
+                    if col != R_NAME and col != R_ATTR:
                         item.setTextAlignment(Qt.AlignCenter)
                     self.ranges.setItem(r, col, item)
         self._filling = False
@@ -466,10 +509,23 @@ class CreerPage(QWidget):
         if self._filling or c is None:
             return
         p, text = c.plages[item.row()], item.text().strip()
-        if item.column() == 2:
+        col = item.column()
+        if col == R_NAME:
             p.nom = text
-        elif text.isdigit() and int(text) <= 255:
-            if item.column() == 0:
+        elif col == R_ATTR:
+            p.attribut = text or c.attribut
+        elif col in (R_PHYS0, R_PHYS1) and (not text or _float(text) is not None):
+            if col == R_PHYS0:
+                p.phys_de = _float(text)
+                p.phys_a = p.phys_de if p.phys_a is None else p.phys_a
+            else:
+                p.phys_a = _float(text)
+                p.phys_de = p.phys_a if p.phys_de is None else p.phys_de
+            if not text:
+                p.phys_de = p.phys_a = None
+            self._show_ranges()
+        elif col in (R_FROM, R_TO) and text.isdigit() and int(text) <= 255:
+            if col == R_FROM:
                 p.debut = int(text)
             else:
                 p.fin = int(text)
@@ -485,7 +541,7 @@ class CreerPage(QWidget):
         c.plages.append(Plage(start, 255, ""))
         self._refresh_range_count()
         self._show_ranges()
-        self.ranges.editItem(self.ranges.item(len(c.plages) - 1, 2))
+        self.ranges.editItem(self.ranges.item(len(c.plages) - 1, R_NAME))
 
     def delete_ranges(self) -> None:
         c = self._current()
@@ -517,5 +573,11 @@ class CreerPage(QWidget):
             self._fill()
             return
         self._fill()
-        self.status.setText(f"Fixture créé : {ft.manufacturer} {ft.name}, {len(ft.modes)} mode(s). Ouvert dans l'atelier.")
+        wheels = creation.roues(self.projet)
+        extras = [f"{len(creation.emetteurs(self.projet))} émetteur(s)"] if creation.emetteurs(self.projet) else []
+        extras += [f"{w} ({len(slots)} emplacements)" for w, slots in wheels.items()]
+        warn = [n for n in self.projet.notes if "canal" in n]
+        self.status.setText(f"Fixture créé : {ft.manufacturer} {ft.name}, {len(ft.modes)} mode(s)"
+                            + (", " + ", ".join(extras) if extras else "") + ". Ouvert dans l'atelier."
+                            + ("   ·   " + " ; ".join(warn[:2]) if warn else ""))
         self.created.emit(ft)

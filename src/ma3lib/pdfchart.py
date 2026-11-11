@@ -21,7 +21,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .creation import Canal, Mode, Plage, Projet, attribuer, est_fine
+import copy
+
+from .creation import Canal, Mode, Plage, Projet, attribuer, detailler, est_fine
 
 
 class PdfError(Exception):
@@ -44,6 +46,8 @@ class _Entry:
     name: str = ""
     default: Optional[int] = None
     ranges: list[Plage] = field(default_factory=list)
+    section: str = ""  # dernier titre de section vu (ligne de texte sans valeurs DMX)
+    description: str = ""
 
 
 @dataclass
@@ -120,6 +124,7 @@ def _mode_names(g: Grille, cols: list[int], header: list[list[str]]) -> list[str
 def lire_grilles(grilles: list[Grille]) -> list[Mode]:
     """Les modes décrits par une suite de tableaux (dans l'ordre du document)."""
     sets: dict[tuple, _Set] = {}
+    annexes: dict[str, list[Plage]] = {}
     singles = 0
     for g in grilles:
         rows = [[(c or "") for c in r] for r in g.rows]
@@ -142,6 +147,9 @@ def lire_grilles(grilles: list[Grille]) -> list[Mode]:
             mode_cols = [j for j in numeric if not (heads[j] & _RANGE_HEAD) and _monotonic(stats[j][2])]
             mode_cols = mode_cols[:1] if mode_cols else []  # sans ligne d'empreintes : un seul mode par tableau
         if not mode_cols:
+            annex = _annexe(body, numeric, stats, ncols)
+            if annex and g.title:
+                annexes.setdefault(_norm(g.title), []).extend(p for p in annex if p not in annexes[_norm(g.title)])
             continue
         range_cols = [j for j in numeric if j not in mode_cols and j > mode_cols[0]]
         default_col = next((j for j in range_cols if heads[j] & {"default", "défaut"}), None)
@@ -178,6 +186,8 @@ def lire_grilles(grilles: list[Grille]) -> list[Mode]:
                     s.entries.append(e)
                 elif name and not e.name:
                     e.name = name
+                if e is not s.last:
+                    e.section = ""
                 s.last = e
             e = s.last
             if e is None:
@@ -196,9 +206,24 @@ def lire_grilles(grilles: list[Grille]) -> list[Mode]:
                                      "") or (name if j != name_col and not any(c is not None for c in chans) else "")
                         break
             if _is_int(lo):
-                p = Plage(int(lo), int(hi) if _is_int(hi) else int(lo), label)
+                start, end = int(lo), int(hi) if _is_int(hi) else int(lo)
+                prev_end = e.ranges[-1].fin if e.ranges else -1
+                if (_is_int(hi) and len(lo) + len(hi) <= 3 and int(lo + hi) <= 255
+                        and (end < start or start <= prev_end < int(lo + hi))):
+                    start = end = int(lo + hi)  # « 26 » centré sur les colonnes de/à, lu « 2 » et « 6 »
+                p = Plage(start, end, label, e.section)
                 if p.fin <= 255 and p not in e.ranges:
                     e.ranges.append(p)
+                if start == 0 and end >= 255 and label and not e.description:
+                    e.description = label
+            elif func and not any(c is not None for c in chans) and not re.match(r"\(?(check|see|voir)\b", func, re.I):
+                e.section = func  # titre de section : « Color Slot », « Ovalizer Rotation »…
+            elif func and any(c is not None for c in chans):
+                if re.match(r"\(?(check|see|voir)\b", func, re.I):
+                    e.section = ""
+                else:
+                    e.section = func
+                    e.description = e.description or func
 
     modes: list[Mode] = []
     for s in sets.values():
@@ -214,22 +239,63 @@ def lire_grilles(grilles: list[Grille]) -> list[Mode]:
                         and (not e.name or (est_fine(e.name) and (not base or prev.nom.lower().startswith(base))))):
                     prev.fine = addr
                     if not e.name:
-                        prev.plages += [p for p in e.ranges if p not in prev.plages]
+                        prev.plages += [copy.deepcopy(p) for p in e.ranges if p not in prev.plages]
                         _tidy(prev)
                     continue
                 prev = Canal(addr, None, re.sub(r"\s*\((check|see|voir)[^)]*\)", "", e.name, flags=re.I).strip(),
-                             defaut=e.default or 0, plages=list(e.ranges))
+                             defaut=e.default or 0, plages=copy.deepcopy(e.ranges), description=e.description)
                 _tidy(prev)
                 prev_e = e
                 mode.canaux.append(prev)
             if len(mode.canaux) >= 3:
                 attribuer(mode)
+                for c in mode.canaux:  # liste complète donnée dans un tableau à part (« see full list »)
+                    key = _norm(c.nom)
+                    full = next((ps for title, ps in annexes.items()
+                                 if key and title.split()[:1] == key.split()[:1]
+                                 and (title.startswith(key) or key.startswith(title))), None)
+                    if full and len(full) > len(c.plages):
+                        c.plages = copy.deepcopy(full)
+                detailler(mode)
                 modes.append(mode)
     return modes
 
 
+def _norm(text: str) -> str:
+    text = re.sub(r"\([^)]*\)|\bchannel\b|\b\d+ ?bits?\b", " ", text.lower())
+    return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def _annexe(body: list[list[str]], numeric: list[int], stats: list, ncols: int) -> list[Plage]:
+    """Tableau de valeurs sans numéro de canal (« Control Channel » : fonction, de, à) :
+    la liste complète des plages d'un canal, donnée à part dans la notice."""
+    pair = next(((a, b) for a, b in zip(numeric, numeric[1:]) if b == a + 1), None)
+    if pair is None:
+        return []
+    text_cols = [j for j in range(pair[0]) if j not in numeric and stats[j][0]]
+    if not text_cols:
+        return []
+    out: list[Plage] = []
+    carried = ""
+    for row in body:
+        lo, hi = _cell(row, pair[0]), _cell(row, pair[1])
+        cells = [_cell(row, j) for j in text_cols]
+        if len(text_cols) > 1:
+            carried = cells[0] or carried
+            label = " ".join(t for t in [carried] + cells[1:] if t)
+        else:
+            label = cells[0]
+        if _is_int(lo) and int(lo) <= 255 and re.search(r"[A-Za-z]{2}", label):  # un nom, pas des nombres
+            end = int(hi) if _is_int(hi) else int(lo)
+            if out and int(lo) <= out[-1].debut:
+                return []  # les valeurs repartent en arrière : ce n'est pas une liste de plages
+            if end <= 255:
+                out.append(Plage(int(lo), end, label))
+    return out if len(out) >= 4 else []
+
+
 def _tidy(c: Canal) -> None:
-    c.plages.sort(key=lambda p: (p.debut, p.fin))
+    """L'ordre de la notice est gardé : des valeurs qui repartent de 0 sont une autre section."""
     if len(c.plages) == 1 and c.plages[0].debut == 0 and c.plages[0].fin >= 255:
         c.plages = []  # une seule plage pleine échelle : rien à nommer
 
@@ -249,13 +315,16 @@ def _grilles(path: Path) -> tuple[list[Grille], str]:
         pdf = pdfplumber.open(path)
     except Exception as exc:
         raise PdfError(f"{Path(path).name} : PDF illisible ({exc})") from exc
-    likely = _pages_probables(path)
+    likely, whole = _pages_probables(path)
+    texts.append(whole)
     with pdf:
         for n, page in enumerate(pdf.pages, 1):
             if n <= 2 or n == len(pdf.pages):
                 texts.append(page.extract_text() or "")
             if likely is not None and n not in likely:
                 continue
+            if not (n <= 2 or n == len(pdf.pages)):
+                texts.append(page.extract_text() or "")
             if len(page.lines) + len(page.rects) < 6:
                 continue
             try:
@@ -283,6 +352,7 @@ def _grilles(path: Path) -> tuple[list[Grille], str]:
                 rows = best.extract()
                 if not rows:
                     continue
+                _recoller(rows, best, crop.extract_words())
                 starts = sorted({round(c[0], 1) for c in best.cells})
                 edges = [(a, b) for a, b in zip(starts, starts[1:] + [best.bbox[2]])]
                 tops = [r.bbox[1] for r in best.rows]
@@ -291,30 +361,78 @@ def _grilles(path: Path) -> tuple[list[Grille], str]:
                 words = [(w["x0"], w["x1"], w["top"], w["text"]) for w in crop.extract_words()
                          if w["top"] < limit - 1]
                 above = page.crop((0, max(0, top - 40), page.width, max(1, top))).extract_text() or ""
-                title = next((ln.strip() for ln in reversed(above.splitlines())
-                              if re.search(r"mode|\bch\b|channel|canaux", ln, re.I)), "")
+                lines = [ln.strip() for ln in above.splitlines() if ln.strip()]
+                title = next((ln for ln in reversed(lines) if re.search(r"mode|\bch\b|channel|canaux", ln, re.I)),
+                             lines[-1] if lines else "")
                 out.append(Grille(rows, edges, words, tops, title, n))
     return out, "\n".join(texts)
 
 
-def _pages_probables(path: Path) -> Optional[set[int]]:
-    """Pages qui peuvent porter une charte (beaucoup de petits nombres + un mot-clé).
-    Tri rapide avec pdfium : pdfplumber met plusieurs secondes sur une page de dessins."""
+def _recoller(rows: list, table, words: list) -> None:
+    """Une cellule fusionnée sur deux colonnes est coupée en deux par le bord de colonne
+    (« NO FUNCT » | « ION / SAFE », « 2 » | « 6 ») : on recolle quand un mot chevauche le bord."""
+    starts = sorted({round(c[0], 1) for c in table.cells})
+    for i, row in enumerate(table.rows):
+        if i >= len(rows):
+            break
+        top, bottom = row.bbox[1], row.bbox[3]
+        inside = [w for w in words if top - 1 <= (w["top"] + w["bottom"]) / 2 <= bottom + 1]
+        for j in range(len(starts) - 1, 0, -1):  # de droite à gauche : les fusions s'enchaînent
+            edge = starts[j]
+            if j < len(rows[i]) and rows[i][j - 1] and rows[i][j] and any(
+                    w["x0"] < edge - 1.5 and w["x1"] > edge + 1.5 for w in inside):
+                rows[i][j - 1] = rows[i][j - 1] + rows[i][j]
+                rows[i][j] = ""
+
+
+def _pages_probables(path: Path) -> tuple[Optional[set[int]], str]:
+    """Pages qui peuvent porter une charte (beaucoup de petits nombres + un mot-clé), et le texte
+    de tout le document. Tri rapide avec pdfium : pdfplumber met plusieurs secondes sur une page
+    de dessins."""
     try:
         import pypdfium2 as pdfium
         doc = pdfium.PdfDocument(str(path))
     except Exception:
-        return None
+        return None, ""
     out: set[int] = set()
+    texts: list[str] = []
     try:
         for i in range(len(doc)):
             text = doc[i].get_textpage().get_text_range()
+            texts.append(text)
             if (len(re.findall(r"(?<![\w.,])\d{1,3}(?![\w.,])", text)) >= 40
-                    and re.search(r"dmx|channel|canal|mode", text, re.I)):
+                    and re.search(r"dmx|channel|canal|mode|value|valeur", text, re.I)):
                 out.add(i + 1)
     finally:
         doc.close()
-    return out
+    return out, "\n".join(texts)
+
+
+_DEG = r"(\d+(?:[.,]\d+)?)\s*°"
+_SEP = r"\s*(?:-|–|to|/)\s*"
+
+
+def appliquer_faits(projet: Projet, text: str) -> None:
+    """Données générales de la notice appliquées aux canaux : course du pan et du tilt
+    (« Pan movement range: 540° »), plage du zoom (« 10°-60° zoom »)."""
+    def find(pattern: str) -> Optional[tuple[float, ...]]:
+        m = re.search(pattern, text, re.I)
+        return tuple(float(g.replace(",", ".")) for g in m.groups() if g) if m else None
+
+    spans = {"Pan": find(r"\bpan\b[^\n\d°]{0,40}?" + r"(\d{3})\s*°"),
+             "Tilt": find(r"\btilt\b[^\n\d°]{0,40}?" + r"(\d{3})\s*°")}
+    zoom = find(_DEG + _SEP + _DEG + r"[^\n]{0,12}zoom") or find(r"zoom[^\n\d]{0,30}" + _DEG + _SEP + _DEG)
+    for mode in projet.modes:
+        for c in mode.canaux:
+            if c.plages or (c.phys_de is not None and (c.attribut != "Zoom" or {c.phys_de, c.phys_a} != {0.0, 1.0})):
+                continue
+            if spans.get(c.attribut):
+                half = spans[c.attribut][0] / 2
+                c.phys_de, c.phys_a = -half, half
+            elif c.attribut == "Zoom" and zoom and len(zoom) == 2:
+                lo, hi = sorted(zoom)
+                reverse = re.search(r"max\w* to min|wide to narrow", c.description, re.I)
+                c.phys_de, c.phys_a = (hi, lo) if reverse else (lo, hi)
 
 
 def _fabricant(text: str) -> str:
@@ -338,6 +456,7 @@ def lire_pdf(path: str | Path) -> Projet:
         raise PdfError(f"{path.name} : aucune charte DMX en tableau trouvée. "
                        "Tu peux saisir les canaux à la main, ou m'envoyer le PDF pour que j'adapte la lecture.")
     projet = Projet(_fabricant(text), _nom(path), "", modes)
+    appliquer_faits(projet, text)
     for m in modes:
         addrs = sorted(a for c in m.canaux for a in c.adresses)
         missing = [a for a in range(1, addrs[-1] + 1) if a not in addrs]
