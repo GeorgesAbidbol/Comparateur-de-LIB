@@ -657,6 +657,7 @@ class EditDialog(QDialog):
 
 
 class AtelierWindow(QMainWindow):
+    shareAsked = Signal()  # l'appli ouvre l'explorateur GDTF Share
     compareAsked = Signal(str)  # « source » ou « cible » : l'appli pose le fixture dans le comparateur
 
     def __init__(self):
@@ -667,7 +668,10 @@ class AtelierWindow(QMainWindow):
 
         self.open = QPushButton("Fixture : ouvrir…")
         self.open.setFont(theme.font(10, True))
-        self.open.clicked.connect(self.choose)
+        source = QMenu(self.open)  # d'où vient le fixture : le PC, ou la banque GDTF Share
+        source.addAction("Sur ce PC…", self.choose)
+        source.addAction("Dans GDTF Share (fabricants)…", lambda: self.shareAsked.emit())
+        self.open.setMenu(source)
         self.modes = QComboBox()
         self.modes.setEnabled(False)
         self.modes.currentIndexChanged.connect(self._mode_changed)

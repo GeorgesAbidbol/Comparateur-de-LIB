@@ -373,6 +373,7 @@ def test_share_section_searches_and_opens_in_atelier(good_bar, tmp_path):
     """Jo, 11/11/2026 : connecter son compte GDTF Share et aller chercher les GDTF dans l'appli."""
     import shutil
     from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import Qt
     from ma3lib import coffre, gdtf_share
     from ma3lib.gui.app import AppWindow
     from ma3lib.gui.share import SharePage
@@ -386,8 +387,14 @@ def test_share_section_searches_and_opens_in_atelier(good_bar, tmp_path):
                 raise gdtf_share.ShareError("connexion refusée")
 
         def list(self):
-            rows = [{"rid": 1, "manufacturer": "Test", "fixture": "GoodBar", "revision": "v1", "modes": [{"name": "12ch"}]},
-                    {"rid": 2, "manufacturer": "Robe", "fixture": "Esprite", "revision": "v3", "modes": []}]
+            rows = [{"rid": 1, "manufacturer": "Test", "fixture": "GoodBar", "revision": "v1", "modes": [{"name": "12ch"}],
+                     "uploader": "Manuf."},
+                    {"rid": 2, "manufacturer": "Robe", "fixture": "Esprite", "revision": "v3", "modes": [],
+                     "uploader": "Manuf.", "lastModified": "20"},
+                    {"rid": 3, "manufacturer": "Robe", "fixture": "Esprite", "revision": "v2", "modes": [],
+                     "uploader": "Manuf.", "lastModified": "10"},
+                    {"rid": 4, "manufacturer": "Bricolo", "fixture": "Truc", "revision": "x", "modes": [],
+                     "uploader": "User"}]
             return [gdtf_share.ShareEntry.from_json(r) for r in rows]
 
         def download(self, entry, dest_dir):
@@ -418,9 +425,14 @@ def test_share_section_searches_and_opens_in_atelier(good_bar, tmp_path):
     page.password.setText("secret")
     assert page.connect_account()
     assert coffre.load(vault) == ("jo@example.org", "secret")  # retenu dans le coffre, pas ailleurs
-    assert page.password.text() == "" and page.results.count() == 2
+    # comme un explorateur : les fabricants en dossiers, sans les envois d'utilisateurs
+    assert page.password.text() == ""
+    assert [page.makers.item(i).data(Qt.UserRole) for i in range(page.makers.count())] == ["Robe", "Test"]
+    assert page.results.count() == 1 and "v3" in page.results.item(0).text()  # dernière révision seulement
+    page.makers.setCurrentRow(1)
+    assert "GoodBar" in page.results.item(0).text()
     page.search.setText("good")
-    assert page.results.count() == 1
+    assert page.makers.count() == 1 and page.results.count() == 1
     page.results.setCurrentRow(0)
     assert page.to_atelier.isEnabled()
     page.open_in_atelier()
@@ -431,6 +443,6 @@ def test_share_section_searches_and_opens_in_atelier(good_bar, tmp_path):
     again = SharePage(FakeClient, tmp_path / "share", vault)
     again.show()
     app.processEvents()
-    assert again.client is not None and again.results.count() == 2
+    assert again.client is not None and again.makers.count() == 2
     again.disconnect_account()
     assert coffre.load(vault) is None and again.client is None and not again.search.isEnabled()

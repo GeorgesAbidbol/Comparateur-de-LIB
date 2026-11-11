@@ -1,6 +1,7 @@
-"""Section « GDTF Share » : se connecter à son compte, chercher un fixture, le télécharger et
-l'ouvrir dans l'atelier ou le comparateur (Jo, 11/11/2026 : « aller directement chercher les
-GDTF sur internet »).
+"""Section « GDTF Share » : se connecter à son compte, puis parcourir la banque comme dans
+l'explorateur de fichiers (Jo, 11/11/2026) : les fabricants à gauche comme des dossiers, leurs
+fixtures à droite, uniquement les fichiers envoyés par les fabricants. Le fixture choisi est
+téléchargé et ouvert dans l'atelier ou le comparateur.
 
 Le compte peut être retenu dans le coffre de Windows (case « Rester connecté », voir
 `ma3lib.coffre`) : jamais dans un fichier de l'appli.
@@ -19,7 +20,6 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QHBoxLayout, QLabel, QLi
 from .. import APP_NAME, coffre, gdtf_share
 from . import theme
 
-MAX_ROWS = 300
 STYLE = f"""
 QLineEdit {{ background: {theme.ROW.name()}; border: none; border-radius: 6px; padding: 8px 12px;
             font-size: 13px; }}
@@ -74,12 +74,19 @@ class SharePage(QWidget):
         top.addWidget(self.login)
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Chercher : fabricant, nom du projecteur…")
+        self.search.setPlaceholderText("Filtrer : fabricant, nom du projecteur…")
         self.search.setEnabled(False)
         self.search.textChanged.connect(lambda _: self.refresh())
+        self.makers = QListWidget()  # les « dossiers »
+        self.makers.setFixedWidth(300)
+        self.makers.currentItemChanged.connect(lambda *_: self._show_fixtures())
         self.results = QListWidget()
         self.results.itemSelectionChanged.connect(self._selection_changed)
         self.results.itemDoubleClicked.connect(lambda _: self.open_in_atelier())
+        browser = QHBoxLayout()
+        browser.setSpacing(10)
+        browser.addWidget(self.makers)
+        browser.addWidget(self.results, 1)
 
         self.status = QLabel("Connecte ton compte pour chercher dans GDTF Share.")
         self.status.setObjectName("dim")
@@ -102,7 +109,7 @@ class SharePage(QWidget):
         lay.setSpacing(10)
         lay.addLayout(top)
         lay.addWidget(self.search)
-        lay.addWidget(self.results, 1)
+        lay.addLayout(browser, 1)
         lay.addLayout(foot)
 
     # ------------------------------------------------------------------
@@ -157,6 +164,7 @@ class SharePage(QWidget):
         self.login.setText("Se connecter")
         self.search.clear()
         self.search.setEnabled(False)
+        self.makers.clear()
         self.results.clear()
         self._selection_changed()
         self.status.setText("Déconnecté. Le compte n'est plus retenu.")
@@ -174,17 +182,40 @@ class SharePage(QWidget):
             self.connect_account()
 
     def refresh(self) -> None:
-        found = gdtf_share.search(self.entries, self.search.text())
-        found.sort(key=lambda e: (e.manufacturer.lower(), e.fixture.lower(), e.last_modified), reverse=False)
+        """Dossiers des fabricants (fichiers officiels seulement), filtrés par la recherche."""
+        self.found = gdtf_share.latest(gdtf_share.search(gdtf_share.official(self.entries), self.search.text()))
+        keep = self.makers.currentItem().data(Qt.UserRole) if self.makers.currentItem() else None
+        counts: dict[str, int] = {}
+        for e in self.found:
+            counts[e.manufacturer] = counts.get(e.manufacturer, 0) + 1
+        self.makers.blockSignals(True)
+        self.makers.clear()
+        for maker in sorted(counts, key=str.lower):
+            item = QListWidgetItem(f"{maker}   ({counts[maker]})")
+            item.setData(Qt.UserRole, maker)
+            self.makers.addItem(item)
+            if maker == keep:
+                self.makers.setCurrentItem(item)
+        if self.makers.currentItem() is None and self.makers.count():
+            self.makers.setCurrentRow(0)
+        self.makers.blockSignals(False)
+        self._show_fixtures()
+
+    def _show_fixtures(self) -> None:
+        item = self.makers.currentItem()
+        maker = item.data(Qt.UserRole) if item else None
         self.results.clear()
-        for e in found[:MAX_ROWS]:
+        for e in getattr(self, "found", []):
+            if e.manufacturer != maker:
+                continue
             modes = f"{len(e.modes)} mode{'s' if len(e.modes) > 1 else ''}"
-            item = QListWidgetItem(f"{e.manufacturer} - {e.fixture}     ·  {e.revision or 'sans révision'}  ·  {modes}")
-            item.setData(Qt.UserRole, e)
-            item.setToolTip("\n".join(e.modes))
-            self.results.addItem(item)
-        more = f" (les {MAX_ROWS} premiers affichés, précise la recherche)" if len(found) > MAX_ROWS else ""
-        self.status.setText(f"{len(found)} fixture(s) sur {len(self.entries)}{more}")
+            row = QListWidgetItem(f"{e.fixture}     ·  {e.revision or 'sans révision'}  ·  {modes}")
+            row.setData(Qt.UserRole, e)
+            row.setToolTip("\n".join(e.modes))
+            self.results.addItem(row)
+        total = len(getattr(self, "found", []))
+        self.status.setText(f"{self.makers.count()} fabricant(s), {total} fixture(s) officiel(s)"
+                            if total else "Aucun fixture ne correspond.")
         self._selection_changed()
 
     def _selection_changed(self) -> None:

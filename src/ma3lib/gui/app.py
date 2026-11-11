@@ -44,6 +44,7 @@ class AppWindow(QMainWindow):
         self.creer = CreerPage()
         self.creer.created.connect(self.open_created)
         self.share = SharePage()
+        self.atelier.shareAsked.connect(lambda: self.show_section("GDTF Share"))
         self.share.openAsked.connect(self.open_downloaded)
         self.share.compareAsked.connect(self.compare_downloaded)
         self.sections = [("Atelier", self.atelier), ("Comparateur", self.comparateur), ("Créer", self.creer),

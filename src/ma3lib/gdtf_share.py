@@ -35,6 +35,18 @@ class ShareEntry:
     modes: list[str]
     last_modified: str
     raw: dict
+    uploader: str = ""  # « Manuf. » pour un fichier du fabricant, « User » pour un envoi d'utilisateur
+
+    @property
+    def official(self) -> bool:
+        return self.uploader.strip().lower().startswith("manuf")
+
+    @property
+    def stamp(self) -> float:
+        try:
+            return float(self.last_modified)
+        except ValueError:
+            return 0.0
 
     @classmethod
     def from_json(cls, d: dict) -> "ShareEntry":
@@ -47,7 +59,25 @@ class ShareEntry:
             modes=[m.get("name", "") if isinstance(m, dict) else str(m) for m in modes],
             last_modified=str(d.get("lastModified", "")),
             raw=d,
+            uploader=str(d.get("uploader", "")),
         )
+
+
+def official(entries: list[ShareEntry]) -> list[ShareEntry]:
+    """Les fichiers des fabricants seulement. Si la liste ne dit pas qui a envoyé quoi, on garde tout."""
+    if not any(e.uploader for e in entries):
+        return list(entries)
+    return [e for e in entries if e.official]
+
+
+def latest(entries: list[ShareEntry]) -> list[ShareEntry]:
+    """Une ligne par fixture : sa révision la plus récente."""
+    best: dict[tuple[str, str], ShareEntry] = {}
+    for e in entries:
+        key = (e.manufacturer.lower(), e.fixture.lower())
+        if key not in best or e.stamp >= best[key].stamp:
+            best[key] = e
+    return sorted(best.values(), key=lambda e: (e.manufacturer.lower(), e.fixture.lower()))
 
 
 def search(entries: list[ShareEntry], text: str) -> list[ShareEntry]:
