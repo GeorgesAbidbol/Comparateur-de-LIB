@@ -25,9 +25,9 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBo
 from .. import compare, diagnostic, gdtf, geotree
 from ..gdtf import FixtureType, Geometry
 from . import theme
-from .. import __version__
+from .. import APP_NAME, __version__
 
-TITLE = f"Comparateur de LIB v{__version__} · Atelier géométries"
+TITLE = f"{APP_NAME} v{__version__} · Atelier géométries"
 
 ROW_H = 30
 GAP_Y = 4

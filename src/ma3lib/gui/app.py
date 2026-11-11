@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel, QMainWindow,
                                QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
-from .. import __version__
+from .. import APP_NAME, __version__
 from . import theme
 from .atelier import AtelierWindow
 from .window import MainWindow
@@ -32,7 +32,7 @@ QWidget#navbar QLabel {{ background: transparent; }}
 class AppWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"Comparateur de LIB v{__version__}")
+        self.setWindowTitle(f"{APP_NAME} v{__version__}")
         self.resize(1360, 880)
         self.atelier = AtelierWindow()
         self.comparateur = MainWindow()
@@ -45,7 +45,7 @@ class AppWindow(QMainWindow):
         nav = QHBoxLayout(navbar)
         nav.setContentsMargins(16, 0, 16, 0)
         nav.setSpacing(4)
-        name = QLabel("Comparateur de LIB")
+        name = QLabel(APP_NAME)
         name.setFont(theme.font(11, True))
         nav.addWidget(name)
         nav.addSpacing(28)

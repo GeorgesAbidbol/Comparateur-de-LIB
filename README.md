@@ -1,4 +1,6 @@
-# Comparateur de LIB
+# Banane Pot
+
+(Nom de l'appli, choisi par Jo. Le dépôt et le paquet Python gardent leurs noms : `Comparateur-de-LIB`, `ma3lib`.)
 
 Outil de bureau (Windows) pour **comparer, nettoyer et préparer les librairies
 GDTF de grandMA3**, sur le modèle de Fixture Fix (qui ne gère que grandMA2).
@@ -91,7 +93,7 @@ Regrouper, fusionner et dupliquer : GDTF seulement pour l'instant.
 
 ## Lancer sous Windows
 
-Une seule appli : double-clic sur `Comparateur de LIB.bat`. Le premier lancement installe
+Une seule appli : double-clic sur `Banane Pot.bat`. Le premier lancement installe
 Python 3.12 avec winget s'il manque, crée `.venv` et installe PySide6. La fenêtre a une section
 par outil (Atelier, Comparateur) ; les prochains outils s'y ajouteront. On peut glisser un
 `.gdtf` ou un `.xml` sur le lanceur pour l'ouvrir dans l'atelier. Ailleurs : `python -m ma3lib.gui`.

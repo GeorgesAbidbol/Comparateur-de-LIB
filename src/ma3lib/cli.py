@@ -233,7 +233,7 @@ def cmd_share_get(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="ma3lib", description="Comparateur de LIB grandMA3 (GDTF)")
+    p = argparse.ArgumentParser(prog="ma3lib", description="Banane Pot : librairies grandMA3 (GDTF, XML MA3)")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("info"); s.add_argument("file"); s.set_defaults(func=cmd_info)
     s = sub.add_parser("check"); s.add_argument("files", nargs="+"); s.set_defaults(func=cmd_check)
