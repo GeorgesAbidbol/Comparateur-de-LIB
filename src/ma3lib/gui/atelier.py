@@ -618,6 +618,11 @@ class AtelierWindow(QMainWindow):
         self.status = QLabel()
         self.status.setObjectName("dim")
         self.status.setFont(theme.font(9))
+        self.split_button = QPushButton("Une base par mode")
+        self.split_button.setEnabled(False)
+        self.split_button.setToolTip("Sépare un arbre partagé par plusieurs modes : chaque mode reçoit sa base,"
+                                     " avec les mêmes modèles. Les adresses ne bougent pas. Ctrl+Z annule.")
+        self.split_button.clicked.connect(self.split_per_mode)
         self.strip_button = QPushButton("Retirer la 3D")
         self.strip_button.setEnabled(False)
         self.strip_button.setToolTip("Supprime toutes les géométries sans canal (Beams, câblage, références"
@@ -632,6 +637,7 @@ class AtelierWindow(QMainWindow):
         foot.addWidget(self.summary)
         foot.addSpacing(24)
         foot.addWidget(self.status, 1)
+        foot.addWidget(self.split_button)
         foot.addWidget(self.strip_button)
         foot.addWidget(self.export_button)
 
@@ -665,6 +671,14 @@ class AtelierWindow(QMainWindow):
         self.modes.blockSignals(False)
         self.export_button.setEnabled(True)
         self._mode_changed()
+
+    def split_per_mode(self) -> None:
+        if not self.ft:
+            return
+        current = self.modes.currentText()
+        if self._apply(geotree.split_per_mode):
+            self.modes.setCurrentText(current)
+            self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
 
     def strip_3d(self) -> None:
         if self.ft and self._apply(geotree.strip_3d):
@@ -802,6 +816,7 @@ class AtelierWindow(QMainWindow):
         refs = {g.reference for g in root.walk() if g.is_reference} if root else set()
         ndbl = len((names | refs) & self.doubles)
         self.strip_button.setEnabled(bool(self.useless))
+        self.split_button.setEnabled(self.ft.format == "gdtf" and bool(geotree.shared_trees(self.ft)))
         dot = lambda c: f"<span style='color:{c}; font-size:15px'>●</span>"
         self.summary.setText(
             f"Nettoyage proposé pour ce mode :  {dot(theme.TEXT_DIM.name())} {n3d} géométrie(s) 3D seule(s)"

@@ -783,3 +783,106 @@ def strip_3d(ft: FixtureType) -> tuple[FixtureType, str]:
             count += sum(1 for _ in g.walk())
     return restore(ft, ET.tostring(ft.xml_root, encoding="utf-8")), \
         f"{count} géométries sans canal retirées (3D seule)"
+
+
+# --------------------------------------------------------------------------
+# Une base par mode (Jo, 11/11/2026 : « souvent les arborescences ne sont pas les mêmes »).
+# Un arbre partagé par plusieurs modes (méthode iTetra2 : plusieurs Breaks par référence,
+# DMXBreak="Overwrite" pour choisir) est recopié pour chaque mode. Les modèles de référence
+# (pixel, master…) et les modèles 3D restent communs : ce sont les mêmes briques partout.
+
+def _used_breaks(ft: FixtureType, mode, ref: Geometry) -> list[int]:
+    """Rangs (0…) des Breaks de `ref` que `mode` utilise, d'après les canaux de son modèle."""
+    tpl = ft.top_level(ref.reference)
+    names = {g.name for g in tpl.walk()} if tpl else {ref.reference}
+    used = set()
+    for ch in mode.channels:
+        if ch.geometry not in names or not ref.breaks or not ch.offset:
+            continue  # un canal virtuel n'a pas d'adresse : il ne choisit pas de Break
+        if ch.dmx_break == "Overwrite":
+            used.add(len(ref.breaks) - 1)
+        else:
+            want = int(ch.dmx_break) if str(ch.dmx_break).isdigit() else 1
+            used.add(next((i for i, b in enumerate(ref.breaks) if b.dmx_break == want), 0))
+    return sorted(used)
+
+
+def shared_trees(ft: FixtureType) -> dict[str, list[str]]:
+    """{racine: [modes]} pour les arbres utilisés par plusieurs modes, quand au moins un de
+    ces modes a des sous-instances (un Esprite garde sa base unique)."""
+    users: dict[str, list[str]] = {}
+    for m in ft.modes:
+        users.setdefault(m.geometry, []).append(m.name)
+    from . import compare
+
+    def multi(names: list[str]) -> bool:  # règle de Jo : seulement les fixtures multi-instances
+        return any(len(compare.flatten(compare.instances(ft, ft.mode(n)))) > 1 for n in names)
+
+    return {k: v for k, v in users.items() if len(v) > 1 and ft.top_level(k) is not None and multi(v)}
+
+
+def split_per_mode(ft: FixtureType) -> tuple[FixtureType, str]:
+    """Donne à chaque mode sa propre base. Le premier mode garde l'arbre d'origine, les autres
+    reçoivent une copie suffixée « M<n° du mode> ». Chaque référence ne garde que les Breaks
+    que son mode utilise. Les canaux, liens et adresses suivent : rien ne bouge sur la console."""
+    import copy
+    if ft.format != "gdtf":
+        raise MoveError("une base par mode : GDTF seulement pour l'instant")
+    shared = shared_trees(ft)
+    if not shared:
+        return ft, "Chaque mode a déjà sa propre base"
+    node = ft.xml_root.find("FixtureType")
+    geos_el = node.find("Geometries")
+    mode_els = {m.get("Name"): m for m in node.iterfind("DMXModes/DMXMode")}
+    taken = {g.name for g in ft.all_geometries()}
+    created = 0
+    for root_name, mode_names in shared.items():
+        root = ft.top_level(root_name)
+        root_el = element_of(ft, root)
+        index = list(geos_el).index(root_el)
+        pristine = copy.deepcopy(root_el)  # l'original est élagué pour le premier mode
+        for k, mode_name in enumerate(mode_names):
+            mode = ft.mode(mode_name)
+            n = ft.modes.index(mode) + 1
+            el = root_el if k == 0 else copy.deepcopy(pristine)
+            renames: dict[str, str] = {}
+            # Breaks : chaque référence ne garde que ceux du mode (repérés sur l'arbre d'origine)
+            for g, ge in zip(root.walk(), (e for e in el.iter() if e.tag in GEOMETRY_TAGS)):
+                if k:
+                    new = f"{g.name} M{n}"
+                    while new in taken:
+                        new += "'"
+                    taken.add(new)
+                    renames[g.name] = new
+                    ge.set("Name", new)
+                if g.is_reference and len(g.breaks) > 1:
+                    keep = _used_breaks(ft, mode, g)
+                    if keep:
+                        for i, b in reversed(list(enumerate(ge.findall("Break")))):
+                            if i not in keep:
+                                ge.remove(b)
+            if not k:
+                continue
+            index += 1
+            geos_el.insert(index, el)
+            created += 1
+            mel = mode_els[mode_name]
+            mel.set("Geometry", renames[root_name])
+            chan_renames = {}
+            for ch in mel.iterfind("DMXChannels/DMXChannel"):
+                geo = ch.get("Geometry", "")
+                if geo in renames:
+                    ch.set("Geometry", renames[geo])
+                    lc = ch.find("LogicalChannel")
+                    attr = lc.get("Attribute", "") if lc is not None else ""
+                    chan_renames[f"{geo}_{attr}"] = f"{renames[geo]}_{attr}"
+            from .remap import LINK_ATTRS
+            for e in mel.iter():
+                for key in LINK_ATTRS:
+                    v = e.get(key)
+                    if v and v.split(".")[0] in chan_renames:
+                        segs = v.split(".")
+                        segs[0] = chan_renames[segs[0]]
+                        e.set(key, ".".join(segs))
+    msg = f"{created} base(s) ajoutée(s) : chaque mode a maintenant la sienne"
+    return restore(ft, ET.tostring(ft.xml_root, encoding="utf-8")), msg

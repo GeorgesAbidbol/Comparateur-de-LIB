@@ -126,3 +126,20 @@ Lens Flower Pixel [Beam]
 - Les zones (Zoom 1 / Zoom 2) regroupent de vrais pixels références : ce ne sont
   pas des « copies » à convertir (corrigé dans le diagnostic).
 - `ma3lib check` ne relève que les deux Pigtails.
+
+## Une base par mode (règle de Jo, 11/11/2026)
+
+Pour un fixture **multi-instances**, chaque mode a sa propre base : « souvent les
+arborescences ne sont pas les mêmes » d'un mode à l'autre (8 bits, pixel, 2U). Un arbre
+partagé oblige à plusieurs Breaks par référence et à `DMXBreak="Overwrite"` (iTetra2), ce qui
+brouille le patch des références.
+
+Ce qui reste commun : **les briques**. Même modèle de base, d'axis, de head, de pixel, et
+mêmes modèles de référence d'un mode à l'autre. Cette règle remplace « un seul arbre pour
+tous les modes » ; elle garde « on réutilise les mêmes modèles ».
+
+Atelier : bouton « Une base par mode » (`geotree.split_per_mode`, GDTF). Le premier mode
+garde l'arbre d'origine, les autres reçoivent une copie suffixée `M<n° du mode>` ; chaque
+référence ne garde que les Breaks de son mode ; canaux, liens et adresses suivent. Un fixture
+sans sous-instance (Esprite) garde sa base unique. Ensuite « Retirer la 3D » élague chaque
+base selon son mode.

@@ -207,3 +207,32 @@ def test_strip_3d_per_mode(tmp_path):
              for i in compare.flatten(compare.instances(ft2, m))]
         assert a == b
     assert geotree.strip_3d(ft2)[1].startswith("Rien")
+
+
+def test_split_per_mode_itetra_style(tmp_path):
+    """Un arbre pour deux modes, deux Breaks par référence (RGBW au pas de 4, RGB en Overwrite
+    au pas de 3) : chaque mode reçoit sa base et chaque référence ne garde que son Break."""
+    refs = "".join(f'<GeometryReference Name="P{i}" Geometry="Px"><Break DMXOffset="{4 * i - 2}" DMXBreak="1"/>'
+                   f'<Break DMXOffset="{3 * i - 1}" DMXBreak="1"/></GeometryReference>' for i in range(1, 4))
+    geos = f'<Geometry Name="Base">{refs}</Geometry><Beam Name="Px"/>'
+    rgbw = channel("Base", "Dimmer", 1) + "".join(
+        channel("Px", a, k, "1") for k, a in enumerate(("ColorAdd_R", "ColorAdd_G", "ColorAdd_B", "Shutter1"), 1))
+    rgb = channel("Base", "Dimmer", 1) + "".join(
+        channel("Px", a, k, "Overwrite") for k, a in enumerate(("ColorAdd_R", "ColorAdd_G", "ColorAdd_B"), 1))
+    rel = '<Relations><Relation Name="r" Master="Base_Dimmer" Follower="Px_ColorAdd_R.ColorAdd_R.ColorAdd_R 1" Type="Multiply"/></Relations>'
+    modes = (f'<DMXMode Name="RGBW" Geometry="Base"><DMXChannels>{rgbw}</DMXChannels>{rel}</DMXMode>'
+             f'<DMXMode Name="RGB" Geometry="Base"><DMXChannels>{rgb}</DMXChannels>{rel}</DMXMode>')
+    ft = gdtf.load(write_gdtf(tmp_path / "t.gdtf", fixture_xml("T", geos, modes)))
+    assert geotree.shared_trees(ft) == {"Base": ["RGBW", "RGB"]}
+    sig = lambda f, m: [(i.ident, [(s.attribute, s.addresses) for s in i.slots])
+                        for i in compare.flatten(compare.instances(f, m))]
+    before = {m.name: sig(ft, m) for m in ft.modes}
+    ft2, msg = geotree.split_per_mode(ft)
+    assert msg.startswith("1 base")
+    assert [m.geometry for m in ft2.modes] == ["Base", "Base M2"]
+    assert [[b.dmx_offset for b in g.breaks] for g in ft2.top_level("Base").children] == [[2], [6], [10]]
+    assert [[b.dmx_offset for b in g.breaks] for g in ft2.top_level("Base M2").children] == [[2], [5], [8]]
+    assert {m.name: sig(ft2, m) for m in ft2.modes} == before
+    rel2 = ft2.xml_root.findall(".//DMXMode")[1].find("Relations/Relation")
+    assert rel2.get("Master") == "Base M2_Dimmer" and rel2.get("Follower").startswith("Px_ColorAdd_R")
+    assert geotree.split_per_mode(ft2)[1].startswith("Chaque mode")
