@@ -89,6 +89,12 @@ l'intérieur d'un même arbre. **Double-clic** : popup nom / type / adresse (un 
 d'adresses d'une référence, ou premier canal dans le mode) / grille (proposée d'après la 3D).
 Regrouper, fusionner et dupliquer : GDTF seulement pour l'instant.
 
+## Lancer sous Windows
+
+Double-clic sur `Atelier.bat` ou `Comparateur.bat` (Python 3.10+ installé). Le premier
+lancement crée `.venv` et installe PySide6. On peut glisser un `.gdtf` ou un `.xml` sur
+`Atelier.bat` pour l'ouvrir directement.
+
 ## Étape 4 : exporter pour grandMA3 2.3.2.0
 
 Bouton **Exporter…** en bas de l'atelier : nom, note (ex. « JO »), GUID (gardé, ou nouveau
