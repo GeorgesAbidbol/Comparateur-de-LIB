@@ -19,6 +19,7 @@ from .. import APP_NAME, __version__
 from . import theme
 from .atelier import AtelierWindow
 from .creer import CreerPage
+from .share import SharePage
 from .window import MainWindow
 
 NAV_STYLE = f"""
@@ -42,7 +43,11 @@ class AppWindow(QMainWindow):
         self.atelier.compareAsked.connect(self.compare)
         self.creer = CreerPage()
         self.creer.created.connect(self.open_created)
-        self.sections = [("Atelier", self.atelier), ("Comparateur", self.comparateur), ("Créer", self.creer)]
+        self.share = SharePage()
+        self.share.openAsked.connect(self.open_downloaded)
+        self.share.compareAsked.connect(self.compare_downloaded)
+        self.sections = [("Atelier", self.atelier), ("Comparateur", self.comparateur), ("Créer", self.creer),
+                         ("GDTF Share", self.share)]
 
         self.stack = QStackedWidget()
         navbar = QWidget()
@@ -93,6 +98,15 @@ class AppWindow(QMainWindow):
         """Le fixture fabriqué dans « Créer » s'ouvre dans l'atelier (géométries, export)."""
         self.atelier.set_fixture(ft)
         self.show_section("Atelier")
+
+    def open_downloaded(self, path: str) -> None:
+        """Un GDTF pris sur GDTF Share s'ouvre dans l'atelier."""
+        self.atelier.load(path)
+        self.show_section("Atelier")
+
+    def compare_downloaded(self, side: str, path: str) -> None:
+        self.comparateur.load(side, path)
+        self.show_section("Comparateur")
 
     def show_section(self, label: str) -> None:
         for i, (name, _) in enumerate(self.sections):

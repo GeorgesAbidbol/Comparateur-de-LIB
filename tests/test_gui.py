@@ -153,7 +153,7 @@ def test_single_app_with_sections(good_bar):
     from ma3lib.gui.app import AppWindow
     app = QApplication.instance() or QApplication([])
     win = AppWindow()
-    assert [b.text() for b in win.buttons.buttons()] == ["Atelier", "Comparateur", "Créer"]
+    assert [b.text() for b in win.buttons.buttons()] == ["Atelier", "Comparateur", "Créer", "GDTF Share"]
     win.atelier.load(str(good_bar))
     assert win.stack.currentWidget() is win.atelier
     win.buttons.button(1).click()
@@ -367,3 +367,70 @@ def test_mesh_bank_and_mesh_from_another_gdtf(bad_bar, good_bar, tmp_path, monke
     assert lyre.get("File") == "USERMESH/BadBar_lyre.glb" and len(lyre.findall(".//Block")) == 2
     win.undo()  # une seule annulation pour la copie et le choix
     assert win.ft.geometry("Pixel1").model == "Pixel"
+
+
+def test_share_section_searches_and_opens_in_atelier(good_bar, tmp_path):
+    """Jo, 11/11/2026 : connecter son compte GDTF Share et aller chercher les GDTF dans l'appli."""
+    import shutil
+    from PySide6.QtWidgets import QApplication
+    from ma3lib import coffre, gdtf_share
+    from ma3lib.gui.app import AppWindow
+    from ma3lib.gui.share import SharePage
+
+    class FakeClient:
+        def __init__(self, user, password):
+            self.ok = (user, password) == ("jo@example.org", "secret")
+
+        def login(self):
+            if not self.ok:
+                raise gdtf_share.ShareError("connexion refusée")
+
+        def list(self):
+            rows = [{"rid": 1, "manufacturer": "Test", "fixture": "GoodBar", "revision": "v1", "modes": [{"name": "12ch"}]},
+                    {"rid": 2, "manufacturer": "Robe", "fixture": "Esprite", "revision": "v3", "modes": []}]
+            return [gdtf_share.ShareEntry.from_json(r) for r in rows]
+
+        def download(self, entry, dest_dir):
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            return Path(shutil.copy(good_bar, dest_dir / "Test@GoodBar@v1.gdtf"))
+
+    from pathlib import Path
+    app = QApplication.instance() or QApplication([])
+    win = AppWindow()
+    assert [name for name, _ in win.sections][-1] == "GDTF Share"
+    class Vault(dict):  # remplace le Gestionnaire d'identifiants de Windows
+        def get_password(self, service, name):
+            return self.get((service, name))
+
+        def set_password(self, service, name, value):
+            self[(service, name)] = value
+
+        def delete_password(self, service, name):
+            del self[(service, name)]
+
+    vault = Vault()
+    page = win.share
+    page._factory, page.folder, page.vault = FakeClient, tmp_path / "share", vault
+    page.user.setText("jo@example.org")
+    page.password.setText("faux")
+    assert not page.connect_account() and "refusée" in page.status.text()
+    assert not page.search.isEnabled() and not vault
+    page.password.setText("secret")
+    assert page.connect_account()
+    assert coffre.load(vault) == ("jo@example.org", "secret")  # retenu dans le coffre, pas ailleurs
+    assert page.password.text() == "" and page.results.count() == 2
+    page.search.setText("good")
+    assert page.results.count() == 1
+    page.results.setCurrentRow(0)
+    assert page.to_atelier.isEnabled()
+    page.open_in_atelier()
+    assert win.stack.currentWidget() is win.atelier and win.atelier.ft.name == "GoodBar"
+    page.send_to_compare("cible")
+    assert win.stack.currentWidget() is win.comparateur and win.comparateur.sides["cible"].ft.name == "GoodBar"
+    # au lancement suivant, la section se reconnecte toute seule ; « Se déconnecter » oublie le compte
+    again = SharePage(FakeClient, tmp_path / "share", vault)
+    again.show()
+    app.processEvents()
+    assert again.client is not None and again.results.count() == 2
+    again.disconnect_account()
+    assert coffre.load(vault) is None and again.client is None and not again.search.isEnabled()
