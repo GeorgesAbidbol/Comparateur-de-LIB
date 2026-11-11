@@ -160,6 +160,7 @@ def restore(ft: FixtureType, data: bytes) -> FixtureType:
     from .gdtf import parse_description
     new = parse_description(data)
     new.source = ft.source
+    new.extra_files = ft.extra_files
     return new
 
 
@@ -730,11 +731,82 @@ GENERIC_MESHES = ("Cube", "Cylinder")  # formes que la console a déjà (MESH/gd
 
 
 def meshes(ft: FixtureType) -> list[str]:
-    """Meshes proposés pour une géométrie : les Models du fixture, puis les formes génériques."""
+    """Meshes proposés pour une géométrie : les Models du fixture, puis la banque de formes
+    simples de l'appli (GDTF seulement), puis les formes génériques de la console."""
+    from . import meshbank
     if ft.xml_root is None:
         return []
     names = [m.get("Name", "") for m in ft.xml_root.iterfind("FixtureType/Models/Model")]
-    return names + [g for g in GENERIC_MESHES if g not in names]
+    bank = meshbank.names() if ft.format == "gdtf" else []
+    return names + [n for n in bank + list(GENERIC_MESHES) if n not in names]
+
+
+def _models_el(ft: FixtureType) -> ET.Element:
+    node = ft.xml_root.find("FixtureType")
+    models_el = node.find("Models")
+    if models_el is None:  # juste avant les géométries
+        models_el = ET.Element("Models")
+        node.insert(list(node).index(node.find("Geometries")), models_el)
+    return models_el
+
+
+def foreign_meshes(path) -> list[str]:
+    """Models d'un autre GDTF qui ont un fichier de mesh (glb ou 3ds)."""
+    from . import gdtf, ma3xml
+    try:
+        other = gdtf.load(path)
+    except (gdtf.GdtfError, OSError) as exc:
+        raise MoveError(f"fichier illisible : {exc}") from exc
+    if other.format != "gdtf" or other.xml_root is None:
+        raise MoveError("il faut un fichier GDTF (les meshes sont dans son archive)")
+    files = ma3xml.read_files(other.source)
+    out = []
+    for m in other.xml_root.iterfind("FixtureType/Models/Model"):
+        f = m.get("File") or ""
+        if f and (ma3xml._find_file(files, "models/gltf", f, ("glb",))
+                  or ma3xml._find_file(files, "models/3ds", f, ("3ds",))):
+            out.append(m.get("Name", ""))
+    return out
+
+
+def import_mesh(ft: FixtureType, path, model_name: str) -> tuple[FixtureType, str]:
+    """Copie un Model et son fichier depuis un autre GDTF (ex. un fixture pris sur GDTF Share).
+    Renvoie le fixture relu et le nom du Model ajouté."""
+    import copy
+    from . import gdtf, ma3xml
+    if ft.format != "gdtf":
+        raise MoveError("fait pour l'instant sur un GDTF seulement (pas encore sur un XML MA3)")
+    try:
+        other = gdtf.load(path)
+    except (gdtf.GdtfError, OSError) as exc:
+        raise MoveError(f"fichier illisible : {exc}") from exc
+    src = next((m for m in other.xml_root.iterfind("FixtureType/Models/Model")
+                if m.get("Name") == model_name), None) if other.xml_root is not None else None
+    if src is None:
+        raise MoveError(f"mesh « {model_name} » introuvable dans {other.name}")
+    files = ma3xml.read_files(other.source)
+    stem = src.get("File") or ""
+    found = (ma3xml._find_file(files, "models/gltf", stem, ("glb",))
+             or ma3xml._find_file(files, "models/3ds", stem, ("3ds",)))
+    if not found:
+        raise MoveError(f"« {model_name} » n'a pas de fichier de mesh")
+    models_el = _models_el(ft)
+    taken = {m.get("Name") for m in models_el.iterfind("Model")}
+    name, n = model_name, 2
+    while name in taken:
+        name, n = f"{model_name} {n}", n + 1
+    ext = found.rsplit(".", 1)[-1].lower()
+    mine = {**ma3xml.read_files(ft.source), **ft.extra_files}
+    new_stem, n = stem, 2
+    while any(p.replace("\\", "/").rsplit("/", 1)[-1].lower() == f"{new_stem}.{ext}".lower() for p in mine):
+        new_stem, n = f"{stem}_{n}", n + 1
+    el = copy.deepcopy(src)
+    el.set("Name", name)
+    el.set("File", new_stem)
+    el.tail = None
+    models_el.append(el)
+    ft.extra_files[f"models/{'gltf' if ext == 'glb' else '3ds'}/{new_stem}.{ext}"] = files[found]
+    return restore(ft, ET.tostring(ft.xml_root, encoding="utf-8")), name
 
 
 def _rename_links(node: ET.Element, renames: dict[str, str]) -> None:
@@ -801,13 +873,15 @@ def apply_edit(ft: FixtureType, g: Geometry, e: Edit) -> tuple[FixtureType, str]
         if not e.mesh:
             el.attrib.pop("Model", None)
         else:
-            models_el = node.find("Models")
-            if models_el is None:  # après les AttributeDefinitions/Wheels/PhysicalDescriptions
-                models_el = ET.Element("Models")
-                node.insert(list(node).index(node.find("Geometries")), models_el)
+            from . import meshbank
+            models_el = _models_el(ft)
             if all(m.get("Name") != e.mesh for m in models_el.iterfind("Model")):
                 attrs = {"Name": e.mesh, "Length": "0.1", "Width": "0.1", "Height": "0.1"}
-                if ft.format == "gdtf":
+                if e.mesh in meshbank.names():  # banque de l'appli : fichier glb fourni à l'export
+                    lx, ly, lz = meshbank.size(e.mesh)
+                    attrs.update(Length=f"{lx:.3f}", Width=f"{ly:.3f}", Height=f"{lz:.3f}",
+                                 File=meshbank.stem(e.mesh))
+                elif ft.format == "gdtf":
                     attrs["PrimitiveType"] = e.mesh
                 else:  # XML MA3 : le mesh générique de la console
                     attrs.update(Mesh=f"[{e.mesh.lower()}_3ds]", File=f"MESH/gdtf_generic/{e.mesh.lower()}.3ds")

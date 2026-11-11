@@ -314,3 +314,56 @@ def test_params_panel_chooses_mesh(bad_bar, tmp_path):
     win.params.mesh.setCurrentText(atelier.NO_MESH)
     win.params.applied.emit()
     assert win.ft.geometry("Body").model == ""
+
+
+def test_mesh_bank_and_mesh_from_another_gdtf(bad_bar, good_bar, tmp_path, monkeypatch):
+    """Jo, 11/11/2026 : une banque de formes simples, et reprendre un mesh d'un autre GDTF."""
+    import zipfile
+    from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog
+    from ma3lib import ma3xml, meshbank
+    from ma3lib.gui import atelier
+
+    for name in meshbank.names():  # chaque forme est un glb valide en apparence
+        data = meshbank.glb(name)
+        assert data[:4] == b"glTF" and int.from_bytes(data[8:12], "little") == len(data)
+
+    app = QApplication.instance() or QApplication([])
+    win = atelier.AtelierWindow()
+    win.load(str(bad_bar))
+
+    def pick(name):
+        g = win.ft.geometry(name)
+        win.tree.selection, win.tree.current = [g], g
+        win._select(g)
+
+    # 1. une forme de la banque
+    pick("Body")
+    win.params.mesh.setCurrentText("Barre")
+    win.params.applied.emit()
+    assert win.ft.geometry("Body").model == "Barre"
+    node = ma3xml.convert(win.ft).find("FixtureType")
+    barre = next(m for m in node.iterfind("Models/Model") if m.get("Name") == "Barre")
+    assert barre.get("File") == "USERMESH/BadBar_bananepot_barre.glb" and barre.findall(".//Block")
+    assert barre.get("Length") == "1.0000"
+
+    # 2. un mesh pris dans un autre GDTF
+    other = tmp_path / "autre.gdtf"
+    with zipfile.ZipFile(good_bar) as zin, zipfile.ZipFile(other, "w") as zout:
+        xml = zin.read("description.xml").decode().replace(
+            "<Geometries>", '<Models><Model Name="Lyre" File="lyre" Length="0.4" Width="0.2" Height="0.5"/>'
+                            '<Model Name="Sans fichier" PrimitiveType="Cube"/></Models><Geometries>')
+        zout.writestr("description.xml", xml)
+        zout.writestr("models/gltf/lyre.glb", b"glTF" + bytes(2000))
+    assert atelier.geotree.foreign_meshes(other) == ["Lyre"]
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(other), ""))
+    monkeypatch.setattr(QInputDialog, "getItem", lambda *a, **k: ("Lyre", True))
+    pick("Pixel1")
+    win.params.mesh.setCurrentText(atelier.OTHER_GDTF)
+    win.params.applied.emit()
+    assert win.ft.geometry("Pixel1").model == "Lyre"
+    assert win.ft.extra_files["models/gltf/lyre.glb"].startswith(b"glTF")
+    node = ma3xml.convert(win.ft).find("FixtureType")
+    lyre = next(m for m in node.iterfind("Models/Model") if m.get("Name") == "Lyre")
+    assert lyre.get("File") == "USERMESH/BadBar_lyre.glb" and len(lyre.findall(".//Block")) == 2
+    win.undo()  # une seule annulation pour la copie et le choix
+    assert win.ft.geometry("Pixel1").model == "Pixel"

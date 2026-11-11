@@ -388,6 +388,7 @@ class MiniGrid(QWidget):
 
 NEW_MODEL = "Nouveau modèle…"
 NO_MESH = "aucun"
+OTHER_GDTF = "Prendre dans un autre GDTF…"
 REF = "GeometryReference"
 
 
@@ -487,6 +488,8 @@ class Params(QWidget):
         self.mesh.addItems([NO_MESH] + (geotree.meshes(ft) if ft is not None else []))
         if g.model and self.mesh.findText(g.model) < 0:
             self.mesh.addItem(g.model)
+        if ft is not None and ft.format == "gdtf":
+            self.mesh.addItem(OTHER_GDTF)
         self.mesh.setCurrentText(g.model or NO_MESH)
         self.mesh.setEnabled(not g.is_reference)
         self.kind.setEnabled(g.parent is not None)  # un modèle ne devient pas une référence
@@ -512,7 +515,7 @@ class Params(QWidget):
         if g.is_reference and g.breaks and self.address.value() != g.breaks[0].dmx_offset:
             e.breaks = [self.address.value()] + [b.dmx_offset for b in g.breaks[1:]]
         mesh = "" if self.mesh.currentText() == NO_MESH else self.mesh.currentText()
-        if not g.is_reference and mesh != g.model:
+        if not g.is_reference and mesh != g.model and mesh != OTHER_GDTF:
             e.mesh = mesh
         if (self.gx.value(), self.gy.value()) != self.place:
             e.grid = (self.gx.value(), self.gy.value())
@@ -931,6 +934,18 @@ class AtelierWindow(QMainWindow):
         edit, kind, model = p.edit(), p.kind.currentText(), p.model.currentText()
         before, done = geotree.snapshot(self.ft), []
         try:
+            if p.mesh.currentText() == OTHER_GDTF and not g.is_reference:
+                path, _ = QFileDialog.getOpenFileName(self, "GDTF où prendre le mesh", "", "GDTF (*.gdtf)")
+                if not path:
+                    return
+                names = geotree.foreign_meshes(path)
+                if not names:
+                    raise geotree.MoveError("ce GDTF ne contient aucun mesh")
+                name, ok = QInputDialog.getItem(self, "Mesh", "Mesh à copier :", names, 0, False)
+                if not ok:
+                    return
+                self.ft, edit.mesh = geotree.import_mesh(self.ft, path, name)
+                done.append(f"mesh « {edit.mesh} » copié")
             if kind == REF and model == NEW_MODEL:
                 if any(x.is_reference for x in sel):
                     raise geotree.MoveError("c'est déjà une référence : choisis un modèle de la liste")

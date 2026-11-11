@@ -785,6 +785,10 @@ def convert(ft: FixtureType, files: Optional[dict[str, bytes]] = None, name: Opt
     src = ft.xml_root.find("FixtureType")
     if src is None:
         raise ExportError("pas de <FixtureType>")
+    # meshes ajoutés dans l'atelier : pris dans un autre GDTF, ou formes de la banque de l'appli
+    from . import meshbank
+    files = {**meshbank.files_for(m.get("File") or "" for m in src.iterfind("Models/Model")),
+             **files, **ft.extra_files}
     name = name or src.get("Name", ft.name)
     ctx = _Ctx(ft, files, name)
     root = ET.Element("GMA3", {"DataVersion": DATA_VERSION})

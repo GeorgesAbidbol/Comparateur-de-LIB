@@ -152,6 +152,8 @@ class FixtureType:
     modes: list[DMXMode] = field(default_factory=list)
     source: Optional[Path] = None
     xml_root: Optional[ET.Element] = field(default=None, repr=False)
+    # fichiers ajoutés par l'atelier (meshes pris dans un autre GDTF), comme dans l'archive
+    extra_files: dict[str, bytes] = field(default_factory=dict, repr=False)
 
     def all_geometries(self) -> Iterator[Geometry]:
         for root in self.geometries:
