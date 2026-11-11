@@ -281,3 +281,36 @@ def test_creer_saisie_a_la_main_puis_atelier():
     assert win.atelier.ft.name == "Barre"
     assert len([g for g in win.atelier.ft.all_geometries() if g.is_reference]) == 4
     win.close()
+
+
+def test_params_panel_chooses_mesh(bad_bar, tmp_path):
+    """Jo, 11/11/2026 : « je ne peux pas choisir le mesh de la géométrie »."""
+    from PySide6.QtWidgets import QApplication
+    from ma3lib import gdtf, ma3xml
+    from ma3lib.gui import atelier
+
+    app = QApplication.instance() or QApplication([])
+    win = atelier.AtelierWindow()
+    win.load(str(bad_bar))
+    g = win.ft.geometry("Body")
+    win.tree.selection, win.tree.current = [g], g
+    win._select(g)
+    items = [win.params.mesh.itemText(i) for i in range(win.params.mesh.count())]
+    assert items[0] == atelier.NO_MESH and "Cube" in items and "Cylinder" in items
+    win.params.mesh.setCurrentText("Cylinder")
+    win.params.applied.emit()
+    assert win.ft.geometry("Body").model == "Cylinder"
+    model = [m for m in win.ft.xml_root.iterfind("FixtureType/Models/Model") if m.get("Name") == "Cylinder"]
+    assert len(model) == 1 and model[0].get("PrimitiveType") == "Cylinder"
+    # à l'export, la console reçoit son propre cylindre
+    node = ma3xml.convert(win.ft).find("FixtureType")
+    out = [m for m in node.iterfind("Models/Model") if m.get("Name") == "Cylinder"]
+    assert out[0].get("File") == "MESH/gdtf_generic/cylinder.3ds"
+    assert node.find("Geometries/Geometry").get("Model") == "Cylinder"
+    # et on peut le retirer
+    g = win.ft.geometry("Body")
+    win.tree.selection, win.tree.current = [g], g
+    win._select(g)
+    win.params.mesh.setCurrentText(atelier.NO_MESH)
+    win.params.applied.emit()
+    assert win.ft.geometry("Body").model == ""

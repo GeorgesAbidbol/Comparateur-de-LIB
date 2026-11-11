@@ -387,6 +387,7 @@ class MiniGrid(QWidget):
 
 
 NEW_MODEL = "Nouveau modèle…"
+NO_MESH = "aucun"
 REF = "GeometryReference"
 
 
@@ -407,8 +408,12 @@ class Params(QWidget):
         self.kind = QComboBox()
         self.kind.currentTextChanged.connect(self._kind_changed)
         self.model = QComboBox()
+        self.model.setPlaceholderText("pour le type GeometryReference")
         self.model.setToolTip("Le modèle que la référence répète. « Nouveau modèle… » le crée "
                               "à partir de cette géométrie.")
+        self.mesh = QComboBox()
+        self.mesh.setToolTip("La forme 3D de la géométrie : un mesh du fixture, ou un cube ou un "
+                             "cylindre de la console.")
         self.address = QSpinBox()
         self.address.setRange(1, 512)
         self.brk = QLabel()
@@ -428,7 +433,8 @@ class Params(QWidget):
         form.setVerticalSpacing(10)
         form.addRow("Nom", self.name)
         form.addRow("Type", self.kind)
-        form.addRow("Modèle", self.model)
+        form.addRow("Référence", self.model)
+        form.addRow("Mesh", self.mesh)
         addr = QHBoxLayout()
         addr.addWidget(self.address, 2)
         addr.addSpacing(8)
@@ -477,6 +483,12 @@ class Params(QWidget):
         self.model.setCurrentIndex(self.model.findText(g.reference) if g.is_reference else -1)
         for w in (self.kind, self.model):
             w.blockSignals(False)
+        self.mesh.clear()
+        self.mesh.addItems([NO_MESH] + (geotree.meshes(ft) if ft is not None else []))
+        if g.model and self.mesh.findText(g.model) < 0:
+            self.mesh.addItem(g.model)
+        self.mesh.setCurrentText(g.model or NO_MESH)
+        self.mesh.setEnabled(not g.is_reference)
         self.kind.setEnabled(g.parent is not None)  # un modèle ne devient pas une référence
         self.model.setEnabled(g.is_reference)
         b = g.breaks[0] if g.breaks else None
@@ -499,6 +511,9 @@ class Params(QWidget):
             e.kind = self.kind.currentText()
         if g.is_reference and g.breaks and self.address.value() != g.breaks[0].dmx_offset:
             e.breaks = [self.address.value()] + [b.dmx_offset for b in g.breaks[1:]]
+        mesh = "" if self.mesh.currentText() == NO_MESH else self.mesh.currentText()
+        if not g.is_reference and mesh != g.model:
+            e.mesh = mesh
         if (self.gx.value(), self.gy.value()) != self.place:
             e.grid = (self.gx.value(), self.gy.value())
         return e

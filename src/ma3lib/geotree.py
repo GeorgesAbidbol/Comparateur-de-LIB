@@ -723,6 +723,18 @@ class Edit:
     breaks: Optional[list[int]] = None  # référence : DMXOffset de chaque Break
     start: Optional[tuple[str, int]] = None  # géométrie : (mode, premier canal voulu)
     grid: Optional[tuple[int, int]] = None
+    mesh: Optional[str] = None  # nom d'un Model du fixture, « Cube »/« Cylinder » (créé au besoin), "" = aucun
+
+
+GENERIC_MESHES = ("Cube", "Cylinder")  # formes que la console a déjà (MESH/gdtf_generic)
+
+
+def meshes(ft: FixtureType) -> list[str]:
+    """Meshes proposés pour une géométrie : les Models du fixture, puis les formes génériques."""
+    if ft.xml_root is None:
+        return []
+    names = [m.get("Name", "") for m in ft.xml_root.iterfind("FixtureType/Models/Model")]
+    return names + [g for g in GENERIC_MESHES if g not in names]
 
 
 def _rename_links(node: ET.Element, renames: dict[str, str]) -> None:
@@ -764,6 +776,11 @@ def apply_edit(ft: FixtureType, g: Geometry, e: Edit) -> tuple[FixtureType, str]
             raise MoveError("les adresses par Break ne concernent qu'une référence")
         if any(not 1 <= b <= 512 for b in e.breaks):
             raise MoveError("adresse hors de 1…512")
+    if e.mesh is not None and e.mesh != g.model:
+        if g.is_reference:
+            raise MoveError("une référence prend le mesh de son modèle")
+        if e.mesh and e.mesh not in meshes(ft):
+            raise MoveError(f"mesh « {e.mesh} » inconnu")
     shift = 0
     if e.start is not None:
         mode_name, start = e.start
@@ -780,6 +797,23 @@ def apply_edit(ft: FixtureType, g: Geometry, e: Edit) -> tuple[FixtureType, str]
     if e.kind is not None and e.kind != g.kind:
         el.tag = e.kind
         done.append(f"type {g.kind} → {e.kind}")
+    if e.mesh is not None and e.mesh != g.model:
+        if not e.mesh:
+            el.attrib.pop("Model", None)
+        else:
+            models_el = node.find("Models")
+            if models_el is None:  # après les AttributeDefinitions/Wheels/PhysicalDescriptions
+                models_el = ET.Element("Models")
+                node.insert(list(node).index(node.find("Geometries")), models_el)
+            if all(m.get("Name") != e.mesh for m in models_el.iterfind("Model")):
+                attrs = {"Name": e.mesh, "Length": "0.1", "Width": "0.1", "Height": "0.1"}
+                if ft.format == "gdtf":
+                    attrs["PrimitiveType"] = e.mesh
+                else:  # XML MA3 : le mesh générique de la console
+                    attrs.update(Mesh=f"[{e.mesh.lower()}_3ds]", File=f"MESH/gdtf_generic/{e.mesh.lower()}.3ds")
+                ET.SubElement(models_el, "Model", attrs)
+            el.set("Model", e.mesh)
+        done.append(f"mesh {e.mesh or 'retiré'}")
     if e.breaks is not None:
         for b_el, off in zip(el.iterfind("Break"), e.breaks):
             b_el.set("DMXPatch" if b_el.get("DMXPatch") is not None else "DMXOffset", str(off))

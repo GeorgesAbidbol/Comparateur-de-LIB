@@ -2,4 +2,4 @@
 
 APP_NAME = "Banane Pot"  # nom de l'appli choisi par Jo (11/11/2026)
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
