@@ -36,4 +36,6 @@ if errorlevel 1 (
 )
 
 :run
+rem Un dossier installe avec une version plus ancienne n'a pas encore le lecteur de PDF.
+".venv\Scripts\python.exe" -c "import pdfplumber" >nul 2>nul || ".venv\Scripts\python.exe" -m pip install --quiet -e ".[gui]"
 start "" ".venv\Scripts\pythonw.exe" -m ma3lib.gui %*

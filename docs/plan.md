@@ -24,10 +24,22 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
    `docs/ma3-xml-notes.md`), bouton « Exporter… » de l'atelier (nom, note, GUID, destination),
    commande `python -m ma3lib export`. Reste : export depuis le comparateur, test onPC.
 
-5. **Créer un fixture de zéro** (idée de Jo, 10/11/2026) : à partir des données constructeur
-   et de la charte DMX PDF. Claude transcrit le PDF en charte CSV (`chartes/`), l'outil
-   construit modes / canaux / attributs MA3 puis demande la structure (têtes, pixels,
-   sections → modèles + références), finition dans l'atelier, export XML MA3.
+5. **Créer un fixture de zéro** (Jo, 11/11/2026 : « partir de 0, soit en glissant un PDF, soit en
+   rentrant soi-même les paramètres, adresses et arborescence de géométrie »).
+   Fait (v0.5.0) : section « Créer » de l'appli (`gui/creer.py`).
+   - On glisse la notice PDF : `pdfchart.py` lit les tableaux de la charte DMX (une colonne de
+     numéros par mode, nom, plages de-à, défaut ; tableau résumé + tableau détaillé rapprochés
+     par leurs numéros de canal ; Fine rattaché à son canal). Vérifié sur la notice
+     PROLIGHTS Muse Fresnel70CT+ (5 modes, 35 à 46 canaux). Seuls les tableaux tracés sont lus.
+   - Ou on saisit tout à la main : modes, canaux, Fine, attribut (proposé d'après le nom,
+     `creation.deviner`), géométrie, copies, défaut, plages nommées.
+   - « Copies » : une géométrie nommée répétée N fois devient un modèle + N références aux
+     adresses contiguës ; avec plusieurs modes, une base par mode (règles de Jo).
+   - « Créer le fixture » fabrique un vrai GDTF en mémoire (`creation.construire`) et l'ouvre dans
+     l'atelier : arbre de géométries, puis export XML MA3 comme pour n'importe quel fixture.
+   - Le projet en cours s'enregistre en `.bpot.json` pour être repris.
+   Reste : notices sans tableau tracé (texte seul), roues (gobos, couleurs) reliées aux plages,
+   plusieurs fonctions par canal (ModeMaster), test d'import onPC d'un fixture créé.
 
 ## Points à vérifier sur le matériel de Jo
 
@@ -39,6 +51,7 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
 - [x] onPC : `C:\ProgramData\MALightingTechnology\gma3_library\fixturetypes` (confirmé par Jo).
 - [ ] Import onPC d'un XML converti par l'outil : Nando 502 OK (Jo, 10/11/2026), iTetra2 à confirmer.
   Maillages 3D, vignette, gobos visibles ? (gobos : référence au pool seulement, comme la console.)
+- [ ] Import onPC d'un fixture créé de zéro (Muse Fresnel70CT+ : attributs proposés, plages).
 - [ ] Connexion GDTF Share réelle (non testable depuis l'environnement de dev).
 - [ ] Comment MA3 2.3.2.0 affiche un dimmer virtuel ajouté dans un GDTF.
 - [x] Axis : une tête seule se fond dans l'instance principale (iTetra2) ; plusieurs têtes

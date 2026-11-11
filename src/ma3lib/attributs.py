@@ -49,6 +49,9 @@ def _patterns(name: str) -> list[tuple[re.Pattern, str]]:
 GDTF_TO_MA3 = {"ColorSub_C": "ColorRGB_R", "ColorSub_M": "ColorRGB_G", "ColorSub_Y": "ColorRGB_B"}
 
 
+_ADDITIVE = re.compile(r"^ColorAdd_(R|G|B|C|M|Y|RY|GY|GC|BC|BM|RM|W|WW|CW|UV)$")
+
+
 def _normalize(name: str) -> str:
     """Renommages MA3 -> GDTF (ColorRGB_R -> ColorAdd_R)."""
     return re.sub(r"^ColorRGB_", "ColorAdd_", name)
@@ -59,7 +62,8 @@ def ma3_name(name: str) -> str:
     if name in GDTF_TO_MA3:
         return GDTF_TO_MA3[name]
     alt = re.sub(r"^ColorAdd_", "ColorRGB_", name)
-    return alt if alt in _table("ma3_attributes.json") else name
+    # la console nomme ColorRGB_* tous les émetteurs additifs standard (C, RY ambre, GY lime…)
+    return alt if alt in _table("ma3_attributes.json") or _ADDITIVE.match(name) else name
 
 
 def gdtf_standard(name: str) -> Optional[dict]:
