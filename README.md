@@ -91,8 +91,8 @@ Regrouper, fusionner et dupliquer : GDTF seulement pour l'instant.
 
 ## Lancer sous Windows
 
-Double-clic sur `Atelier.bat` ou `Comparateur.bat` (Python 3.10+ installé). Le premier
-lancement crée `.venv` et installe PySide6. On peut glisser un `.gdtf` ou un `.xml` sur
+Double-clic sur `Atelier.bat` ou `Comparateur.bat`. Le premier lancement installe Python 3.12
+avec winget s'il manque, crée `.venv` et installe PySide6. On peut glisser un `.gdtf` ou un `.xml` sur
 `Atelier.bat` pour l'ouvrir directement.
 
 ## Étape 4 : exporter pour grandMA3 2.3.2.0
