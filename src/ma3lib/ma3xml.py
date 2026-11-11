@@ -254,15 +254,30 @@ class _Ctx:
 
 
 def _attribute_renames(ft: FixtureType) -> dict[str, str]:
-    """ColorAdd_R -> ColorRGB_R… sauf si le nom MA3 est déjà pris par un autre attribut."""
+    """ColorAdd_R -> ColorRGB_R… sauf si le nom MA3 est déjà pris par un autre attribut.
+
+    ColorSub_C et ColorAdd_R donnent tous deux ColorRGB_R : c'est permis tant qu'ils ne sont
+    jamais ensemble sur la même géométrie d'un même mode (ex. un mode CMY et un mode RGB)."""
     names = set(ft.attributes)
+    together: set[frozenset] = set()
+    for mode in ft.modes:
+        by_geo: dict[str, set[str]] = {}
+        for ch in mode.channels:
+            by_geo.setdefault(ch.geometry, set()).update(lc.attribute for lc in ch.logical_channels)
+        for attrs in by_geo.values():
+            together |= {frozenset((a, b)) for a in attrs for b in attrs if a != b}
     out: dict[str, str] = {}
-    taken = set(names)
-    for n in names:
+    owner: dict[str, list[str]] = {n: [n] for n in names}
+    for n in sorted(names):  # ordre fixe : ColorAdd_* avant ColorSub_*
         new = attributs.ma3_name(n)
-        if new != n and new not in taken:
-            out[n] = new
-            taken.add(new)
+        if new == n:
+            continue
+        others = owner.get(new, [])
+        if others and (n not in attributs.GDTF_TO_MA3 or new in names
+                       or any(frozenset((n, o)) in together for o in others)):
+            continue
+        out[n] = new
+        owner.setdefault(new, []).append(n)
     return out
 
 
@@ -304,8 +319,11 @@ def _attribute_definitions(ctx: _Ctx, src: ET.Element, out: ET.Element) -> None:
             _el(e, "Feature", {"Name": f.get("Name")})
     attrs = _el(ad, "Attributes")
     defs = _ma3_definitions()
+    done: set[Optional[str]] = set()
     for a in src.iterfind("Attributes/Attribute"):
-        _attribute(ctx, a, attrs, defs)
+        if ctx.attr(a.get("Name", "")) not in done:  # ColorSub_C et ColorAdd_R : un seul ColorRGB_R
+            done.add(ctx.attr(a.get("Name", "")))
+            _attribute(ctx, a, attrs, defs)
 
 
 def _media_block(parent: ET.Element, data: bytes) -> None:

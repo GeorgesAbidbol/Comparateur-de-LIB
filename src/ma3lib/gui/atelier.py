@@ -729,7 +729,11 @@ class AtelierWindow(QMainWindow):
             self.load(path)
 
     def load(self, path: str, mode: str = "") -> None:
-        self.ft = gdtf.load(path)
+        self.set_fixture(gdtf.load(path), mode)
+
+    def set_fixture(self, ft: FixtureType, mode: str = "") -> None:
+        """Ouvre un fixture déjà en mémoire (ex. celui que la section « Créer » vient de fabriquer)."""
+        self.ft = ft
         self.history = []
         self.status.setText("")
         self._diagnose()

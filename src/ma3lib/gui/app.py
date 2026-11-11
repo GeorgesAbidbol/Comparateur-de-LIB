@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel, 
 from .. import APP_NAME, __version__
 from . import theme
 from .atelier import AtelierWindow
+from .creer import CreerPage
 from .window import MainWindow
 
 NAV_STYLE = f"""
@@ -37,7 +38,9 @@ class AppWindow(QMainWindow):
         self.atelier = AtelierWindow()
         self.comparateur = MainWindow()
         self.atelier.compareAsked.connect(self.compare)
-        self.sections = [("Atelier", self.atelier), ("Comparateur", self.comparateur)]
+        self.creer = CreerPage()
+        self.creer.created.connect(self.open_created)
+        self.sections = [("Atelier", self.atelier), ("Comparateur", self.comparateur), ("Créer", self.creer)]
 
         self.stack = QStackedWidget()
         navbar = QWidget()
@@ -84,6 +87,11 @@ class AppWindow(QMainWindow):
                                      "depuis l'atelier")
         self.show_section("Comparateur")
 
+    def open_created(self, ft) -> None:
+        """Le fixture fabriqué dans « Créer » s'ouvre dans l'atelier (géométries, export)."""
+        self.atelier.set_fixture(ft)
+        self.show_section("Atelier")
+
     def show_section(self, label: str) -> None:
         for i, (name, _) in enumerate(self.sections):
             if name == label:
@@ -99,7 +107,10 @@ def main(argv: list[str] | None = None) -> int:
     app.setStyleSheet(theme.STYLE)
     app.setFont(theme.font(10))
     win = AppWindow()
-    if argv:  # un fichier glissé sur le lanceur s'ouvre dans l'atelier
+    if argv and argv[0].lower().endswith(".pdf"):  # une notice glissée sur le lanceur : section « Créer »
+        win.show_section("Créer")
+        win.creer.load_pdf(argv[0])
+    elif argv:  # un fixture glissé sur le lanceur s'ouvre dans l'atelier
         win.atelier.load(argv[0], argv[1] if len(argv) > 1 else "")
     win.show()
     return app.exec()

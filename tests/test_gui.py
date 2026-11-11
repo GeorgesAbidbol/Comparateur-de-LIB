@@ -153,7 +153,7 @@ def test_single_app_with_sections(good_bar):
     from ma3lib.gui.app import AppWindow
     app = QApplication.instance() or QApplication([])
     win = AppWindow()
-    assert [b.text() for b in win.buttons.buttons()] == ["Atelier", "Comparateur"]
+    assert [b.text() for b in win.buttons.buttons()] == ["Atelier", "Comparateur", "Créer"]
     win.atelier.load(str(good_bar))
     assert win.stack.currentWidget() is win.atelier
     win.buttons.button(1).click()
@@ -243,4 +243,41 @@ def test_params_panel_makes_references_and_renames(bad_bar, monkeypatch):
     pick("Pixel2")
     with __import__("pytest").raises(atelier.geotree.MoveError):
         atelier.geotree.to_reference(win.ft, [win.ft.geometry("Body")], "Pixel")
+
+
+def test_creer_saisie_a_la_main_puis_atelier():
+    """Section « Créer » : canaux saisis à la main, pixels en copies, fixture ouvert dans l'atelier."""
+    from PySide6.QtWidgets import QApplication
+    from ma3lib.gui import creer
+    from ma3lib.gui.app import AppWindow
+    app = QApplication.instance() or QApplication([])
+    win = AppWindow()
+    win.show_section("Créer")
+    page = win.creer
+    page.build()
+    assert "À corriger" in page.status.text() and win.stack.currentWidget() is page
+    page.maker.setText("Test")
+    page.name.setText("Barre")
+    page.rename_mode("13ch")
+    for name in ("Dimmer", "Red", "Green", "Blue"):
+        page.add_channel()
+        page.table.item(page.table.rowCount() - 1, creer.C_NAME).setText(name)
+    assert [c.attribut for c in page.mode.canaux] == ["Dimmer", "ColorAdd_R", "ColorAdd_G", "ColorAdd_B"]
+    for row in (1, 2, 3):
+        page.table.item(row, creer.C_GEO).setText("Pixel")
+    page.table.item(1, creer.C_COPIES).setText("4")
+    assert [c.copies for c in page.mode.canaux] == [1, 4, 4, 4]
+    assert "13 adresses" in page.count.text()
+    page.table.selectRow(0)
+    page.add_range()
+    assert page.table.item(0, creer.C_RANGES).text() == "1"
+    page.duplicate_mode("copie")
+    page.delete_mode()
+    assert [m.nom for m in page.projet.modes] == ["13ch"]
+    page.grab()
+    page.build()
+    app.processEvents()
+    assert win.stack.currentWidget() is win.atelier
+    assert win.atelier.ft.name == "Barre"
+    assert len([g for g in win.atelier.ft.all_geometries() if g.is_reference]) == 4
     win.close()

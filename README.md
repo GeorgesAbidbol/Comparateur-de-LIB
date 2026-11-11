@@ -110,3 +110,20 @@ réécrit tel quel avec les modifications de l'atelier.
 python -m ma3lib export fichier.gdtf --dossier D:\lib [--nom "…" --note JO --nouveau-guid --remplacer]
 python -m ma3lib export fichier.gdtf --onpc        # ou --cle
 ```
+
+## Étape 5 : créer un fixture de zéro
+
+Section **Créer** de l'appli. Deux façons de partir, qui se combinent :
+
+- **Glisser la notice PDF** du fabricant sur la zone en pointillés (ou sur « Banane Pot.bat ») :
+  la charte DMX est lue toute seule (modes, canaux, Fine, plages, valeurs par défaut) et un
+  attribut grandMA3 est proposé pour chaque canal.
+- **Saisir à la main** : « + Mode », « + Canal », puis adresse, Fine, nom, attribut, géométrie.
+  Pour des pixels ou des têtes identiques, saisir les canaux de la première instance, leur donner
+  un nom de géométrie (ex. `Pixel`) et un nombre de **copies** : on obtient un modèle + N
+  références aux adresses qui se suivent.
+
+« Créer le fixture → Atelier » ouvre le résultat dans l'atelier (géométries, puis « Exporter… »
+en XML MA3). « Enregistrer le projet… » garde la saisie (`.bpot.json`).
+Seules les chartes en tableaux tracés sont lues ; pour une notice mal lue, corriger dans le
+tableau ou envoyer le PDF pour adapter `pdfchart.py`.
