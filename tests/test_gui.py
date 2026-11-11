@@ -174,3 +174,25 @@ def test_atelier_sends_fixture_to_comparator(bad_bar, good_bar):
     assert win.stack.currentWidget() is win.comparateur
     assert win.comparateur.sides["cible"].ft is win.atelier.ft
     assert win.comparateur.canvas.counts()[1] > 0
+
+
+def test_mini_grid_keeps_16_pixels_on_one_row(tmp_path):
+    """Jo, 11/11/2026 (ACME Pixel Line, 16 pixels en ligne) : l'aperçu coupait à 12 colonnes."""
+    from PySide6.QtWidgets import QApplication
+    from conftest import channel, fixture_xml, write_gdtf
+    from ma3lib import gdtf
+    from ma3lib.gui import atelier
+
+    app = QApplication.instance() or QApplication([])
+    pix = "".join(f'<Geometry Name="Array {i}"/>' for i in range(109, 125))
+    chans = "".join(channel(f"Array {i}", "Dimmer", i - 108) for i in range(109, 125))
+    xml = fixture_xml("Line", f'<Geometry Name="Base">{pix}</Geometry>',
+                      f'<DMXMode Name="M" Geometry="Base"><DMXChannels>{chans}</DMXChannels></DMXMode>')
+    ft = gdtf.load(write_gdtf(tmp_path / "line.gdtf", xml))
+    grid = atelier.MiniGrid()
+    grid.resize(380, 170)
+    grid.set(ft.geometry("Array 120"), ft)
+    assert grid.cells == [(i, 0) for i in range(16)] and grid.current == (11, 0)
+    cols, rows, size = grid.layout()
+    assert (cols, rows) == (16, 1) and cols * size <= 380
+    grid.grab()

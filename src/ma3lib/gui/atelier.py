@@ -338,37 +338,52 @@ def _index(items: list[Geometry], g: Optional[Geometry]) -> int:
     return next((i for i, x in enumerate(items) if x is g), -1)
 
 
+def grid_place(g: Geometry, ft=None) -> tuple[int, int]:
+    """Place dans la grille : celle écrite dans le fichier, sinon celle proposée."""
+    el = geotree.element_of(ft, g) if ft is not None else None
+    gx, gy = (el.get("GridX"), el.get("GridY")) if el is not None else (None, None)
+    if gx is not None and gy is not None:
+        return int(gx), int(gy)
+    return geotree.grid_proposal(g, ft)
+
+
 class MiniGrid(QWidget):
-    """Grille façon Fixture Hero : les géométries sœurs, la choisie en jaune."""
+    """Grille façon Fixture Hero : les géométries sœurs à leur vraie place, la choisie en jaune.
+    16 pixels en ligne = une seule ligne de 16 (Jo, 11/11/2026), jamais de retour à la ligne."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.cells: list[str] = []
-        self.current = ""
+        self.cells: list[tuple[int, int]] = []
+        self.current: Optional[tuple[int, int]] = None
         self.setMinimumHeight(170)
 
-    def set(self, geo: Optional[Geometry]) -> None:
+    def set(self, geo: Optional[Geometry], ft=None) -> None:
         sibs = geo.parent.children if geo and geo.parent else ([geo] if geo else [])
-        self.cells = [g.name for g in sibs]
-        self.current = geo.name if geo else ""
+        self.cells = [grid_place(g, ft) for g in sibs]
+        self.current = grid_place(geo, ft) if geo else None
         self.update()
+
+    def layout(self) -> tuple[int, int, float]:
+        """Colonnes, lignes et taille d'une case : les cases rétrécissent pour tout faire tenir."""
+        cols = max(x for x, _ in self.cells) + 1
+        rows = max(y for _, y in self.cells) + 1
+        size = min(26.0, (self.width() - 20) / cols, (self.height() - 20) / rows)
+        return cols, rows, max(size, 2.0)
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.fillRect(self.rect(), theme.PANEL)
-        n = len(self.cells)
-        if not n:
+        if not self.cells:
             return
-        cols = min(n, 12)
-        size = min(26.0, (self.width() - 20) / cols)
-        rows = (n + cols - 1) // cols
+        cols, rows, size = self.layout()
+        gap = 3 if size >= 10 else 1
         x0 = (self.width() - cols * size) / 2
-        y0 = max(10.0, (self.height() - rows * size) / 2)
-        for i, name in enumerate(self.cells):
-            r = QRectF(x0 + (i % cols) * size, y0 + (i // cols) * size, size - 3, size - 3)
-            p.setPen(QPen(theme.ACCENT if name == self.current else theme.ROW_HOVER, 2))
-            p.setBrush(theme.ACCENT if name == self.current else theme.BG)
-            p.drawRect(r)
+        y0 = (self.height() - rows * size) / 2
+        for cell in sorted(set(self.cells), key=lambda c: c == self.current):
+            on = cell == self.current
+            p.setPen(QPen(theme.ACCENT if on else theme.ROW_HOVER, 2 if size >= 10 else 1))
+            p.setBrush(theme.ACCENT if on else theme.BG)
+            p.drawRect(QRectF(x0 + cell[0] * size, y0 + cell[1] * size, size - gap, size - gap))
 
 
 class Params(QWidget):
@@ -425,7 +440,7 @@ class Params(QWidget):
         self.setStyleSheet(f"QLineEdit, QSpinBox {{ background: {theme.ROW.name()}; border: none;"
                            f" border-radius: 6px; padding: 6px 10px; }}")
 
-    def show_geo(self, g: Optional[Geometry], flag_3d: bool, ident: str = "") -> None:
+    def show_geo(self, g: Optional[Geometry], flag_3d: bool, ident: str = "", ft=None) -> None:
         if g is None:
             return
         self.title.setText(f"{ident}   {g.name}" if ident else g.name)
@@ -438,10 +453,10 @@ class Params(QWidget):
         if b:
             self.address.setValue(b.dmx_offset)
             self.brk.setValue(b.dmx_break)
-        idx = g.parent.children.index(g) if g.parent else 0
-        self.gx.setValue(idx)
-        self.gy.setValue(0)
-        self.grid.set(g)
+        x, y = grid_place(g, ft)
+        self.gx.setValue(x)
+        self.gy.setValue(y)
+        self.grid.set(g, ft)
         self.note.setText("Aucun canal dans aucun mode : sert seulement à la 3D, le nettoyeur "
                           "la retirera." if flag_3d else "")
 
@@ -838,7 +853,7 @@ class AtelierWindow(QMainWindow):
 
     def _select(self, g) -> None:
         self.params.show_geo(g, g is not None and g.name in self.useless,
-                             self.tree.idents.get(g.name, "") if g is not None else "")
+                             self.tree.idents.get(g.name, "") if g is not None else "", self.ft)
 
 
 def main(argv: list[str] | None = None) -> int:
