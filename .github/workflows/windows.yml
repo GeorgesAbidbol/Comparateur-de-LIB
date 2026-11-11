@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main, "claude/project-thread-n9qj5m"]
-    paths: ["src/**", "packaging/**", "pyproject.toml", ".github/workflows/windows.yml"]
+    paths: ["src/**", "tests/**", "packaging/**", "pyproject.toml", ".github/workflows/windows.yml"]
 
 permissions:
   contents: read
