@@ -14,6 +14,7 @@ Géométries : par défaut Base > Yoke (Pan) > Head (Tilt et le reste). Une géo
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import uuid
@@ -88,6 +89,18 @@ class Projet:
     court: str = ""
     modes: list[Mode] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # remarques de la lecture du PDF
+    images: dict[str, str] = field(default_factory=dict)  # « roue|emplacement » -> PNG en base64
+
+    def image(self, roue: str, emplacement: str) -> Optional[bytes]:
+        data = self.images.get(cle_image(roue, emplacement))
+        return base64.b64decode(data) if data else None
+
+    def definir_image(self, roue: str, emplacement: str, png: Optional[bytes]) -> None:
+        """Image d'un emplacement de roue (gobo, couleur) ; None la retire."""
+        if png:
+            self.images[cle_image(roue, emplacement)] = base64.b64encode(png).decode("ascii")
+        else:
+            self.images.pop(cle_image(roue, emplacement), None)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False, indent=1)
@@ -97,7 +110,12 @@ class Projet:
         d = json.loads(text)
         modes = [Mode(m["nom"], [Canal(**{**c, "plages": [Plage(**p) for p in c.get("plages", [])]})
                                  for c in m.get("canaux", [])]) for m in d.get("modes", [])]
-        return cls(d.get("fabricant", ""), d.get("nom", ""), d.get("court", ""), modes, d.get("notes", []))
+        return cls(d.get("fabricant", ""), d.get("nom", ""), d.get("court", ""), modes, d.get("notes", []),
+                   d.get("images", {}))
+
+
+def cle_image(roue: str, emplacement: str) -> str:
+    return f"{roue}|{emplacement.strip().lower()}"
 
 
 def _par_geometrie(mode: Mode) -> dict[str, list[Canal]]:
@@ -513,6 +531,17 @@ def roues(projet: Projet) -> dict[str, list[str]]:
     return {w: s for w, s in out.items() if s}
 
 
+def canaux_de_roue(projet: Projet) -> dict[str, str]:
+    """Roue -> noms (notice) de ses canaux, pour reconnaître la roue dont parle un titre de la notice."""
+    out: dict[str, set[str]] = {}
+    for mode in projet.modes:
+        for c in mode.canaux:
+            wheel = roue_de(c.attribut)
+            if wheel:
+                out.setdefault(wheel, set()).add(c.nom)
+    return {w: " ".join(sorted(n)) for w, n in out.items()}
+
+
 def emetteurs(projet: Projet) -> list[str]:
     """Noms des émetteurs LED créés (un par attribut ColorAdd_* utilisé)."""
     used = {c.attribut for m in projet.modes for c in m.canaux}
@@ -633,12 +662,18 @@ def construire(projet: Projet) -> FixtureType:
         ET.SubElement(attrs, "Attribute", d)
 
     wheels = roues(projet)
+    media: dict[str, bytes] = {}  # images des emplacements, rangées comme dans une archive GDTF
     we = ET.SubElement(ft, "Wheels")
     for wheel, slots in wheels.items():
         w = ET.SubElement(we, "Wheel", {"Name": wheel})
         for slot in slots:
             color = couleur_emplacement(slot) if wheel.startswith("ColorWheel") else "0.3127,0.3290,100.0"
-            ET.SubElement(w, "Slot", {"Name": slot, "Color": color})
+            se = ET.SubElement(w, "Slot", {"Name": slot, "Color": color})
+            png = projet.image(wheel, slot)
+            if png:
+                stem = re.sub(r"[^A-Za-z0-9]+", "_", f"{wheel}_{slot}").strip("_")
+                se.set("MediaFileName", stem)
+                media[f"wheels/{stem}.png"] = png
 
     pd = ET.SubElement(ft, "PhysicalDescriptions")
     em = ET.SubElement(pd, "Emitters")
@@ -764,7 +799,9 @@ def construire(projet: Projet) -> FixtureType:
     ET.SubElement(revs, "Revision", {"Text": f"Créé avec {APP_NAME}", "UserID": "0",
                                      "Date": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")})
     projet.notes = [n for n in projet.notes if n not in notes] + notes
-    return gdtf.parse_description(ET.tostring(root, encoding="utf-8", xml_declaration=True))
+    built = gdtf.parse_description(ET.tostring(root, encoding="utf-8", xml_declaration=True))
+    built.extra_files.update(media)
+    return built
 
 
 def ecrire_gdtf(ft: FixtureType, path: Path) -> Path:
@@ -772,4 +809,6 @@ def ecrire_gdtf(ft: FixtureType, path: Path) -> Path:
     path = Path(path)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("description.xml", ET.tostring(ft.xml_root, encoding="utf-8", xml_declaration=True))
+        for name, data in ft.extra_files.items():
+            zf.writestr(name, data)
     return path

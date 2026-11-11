@@ -262,3 +262,76 @@ def test_lire_grilles_sections_annexe_et_valeur_fusionnee():
         (26, 26, "Color Positioning", "Color1"), (200, 255, "Color Wheel Rotation", "Color1WheelSpin")]
     assert [p.nom for p in raw["Control"].plages] == ["NO FUNCTION", "PAN REVERSE ON", "PAN REVERSE OFF",
                                                       "RESET ALL", "RESET ZOOM"]
+
+
+# ---------------------------------------------------------------- images des roues
+
+def _projet_gobos():
+    return Projet("Test", "Gobos", "", [Mode("M", [
+        Canal(1, nom="Rotating gobo wheel", attribut="Gobo1",
+              plages=[Plage(0, 9, "Open")] + [Plage(10 + k * 10, 19 + k * 10, f"Gobo {k + 1}") for k in range(6)]
+              + [Plage(200, 255, "Rotation")]),
+        Canal(2, nom="Static gobo wheel", attribut="Gobo2",
+              plages=[Plage(0, 9, "Open"), Plage(10, 19, "Dots"), Plage(20, 29, "Bars")]),
+        Canal(3, nom="Dimmer", attribut="Dimmer")])])
+
+
+_PNG = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de"
+                     "0000000c4944415408d763f8ffff3f0005fe02fedccc59e70000000049454e44ae426082")
+
+
+def test_image_d_emplacement_dans_le_fixture_et_l_export(tmp_path):
+    import zipfile
+    from ma3lib import ma3xml
+    p = _projet_gobos()
+    p.definir_image("GoboWheel 1", "Gobo 3", _PNG)
+    p = Projet.from_json(p.to_json())  # les images suivent le projet enregistré
+    assert p.image("GoboWheel 1", "gobo 3") == _PNG
+    ft = creation.construire(p)
+    slot = ft.xml_root.find(".//Wheel[@Name='GoboWheel 1']/Slot[@Name='Gobo 3']")
+    assert ft.extra_files[f"wheels/{slot.get('MediaFileName')}.png"] == _PNG
+    assert ft.xml_root.find(".//Slot[@Name='Gobo 2']").get("MediaFileName") is None
+    creation.ecrire_gdtf(ft, tmp_path / "g.gdtf")
+    assert f"wheels/{slot.get('MediaFileName')}.png" in zipfile.ZipFile(tmp_path / "g.gdtf").namelist()
+    out = ma3xml.convert(ft)
+    images = out.findall(".//GoboImage")
+    assert len(images) == 1 and images[0].find("FileContent/Block").get("Base64")
+    p.definir_image("GoboWheel 1", "Gobo 3", None)
+    assert not p.images
+
+
+def test_rattacher_les_images_aux_emplacements():
+    from ma3lib import pdfimages
+    slots = ["Open", "Gobo 1", "Gobo 2", "Gobo 12"]
+    ims = [{"label": " Gobo 12"}, {"label": "2"}, {"label": ""}]
+    got = pdfimages.rattacher(ims, slots)
+    assert got["Gobo 12"] is ims[0] and got["Gobo 2"] is ims[1] and got["Gobo 1"] is ims[2] and "Open" not in got
+    assert pdfimages.rattacher([{"label": ""}], slots) == {}  # pas autant d'images que d'emplacements
+    noms = {"GoboWheel 1": "Rotating gobo wheel", "GoboWheel 2": "Static gobo wheel", "ColorWheel 1": "Colour wheel"}
+    assert pdfimages.choisir_roue("STATIC GOBO WHEEL", noms) == "GoboWheel 2"
+    assert pdfimages.choisir_roue("Rotating gobos", noms) == "GoboWheel 1"
+    assert pdfimages.choisir_roue("14 - COLOR WHEEL", noms) == "ColorWheel 1"
+
+
+def test_images_de_gobos_lues_dans_un_pdf(tmp_path):
+    pytest.importorskip("pdfplumber")
+    rl = pytest.importorskip("reportlab.pdfgen.canvas")
+    from PIL import Image
+    from reportlab.lib.utils import ImageReader
+    from ma3lib import pdfimages
+    c = rl.Canvas(str(tmp_path / "g.pdf"), pagesize=(595, 842))
+    c.drawString(50, 790, "ROTATING GOBO WHEEL")
+    for k in range(6):
+        x, y = 50 + (k % 3) * 120, 680 - (k // 3) * 120
+        c.drawImage(ImageReader(Image.new("RGB", (40, 40), (40 * k, 0, 0))), x, y, 80, 80)
+        c.drawString(x + 25, y - 12, f"Gobo {6 - k}")  # numérotés à rebours : c'est le texte qui décide
+    c.drawString(50, 400, "STATIC GOBO WHEEL")
+    for k in range(2):
+        c.drawImage(ImageReader(Image.new("RGB", (40, 40), (0, 100 * k + 50, 0))), 50 + k * 100, 300, 70, 70)
+    c.drawImage(ImageReader(Image.new("RGB", (400, 40), "blue")), 50, 100, 400, 40)  # un bandeau, pas un gobo
+    c.save()
+    p = _projet_gobos()
+    assert pdfimages.images_des_roues(tmp_path / "g.pdf", p) == 8
+    import io
+    red = Image.open(io.BytesIO(p.image("GoboWheel 1", "Gobo 6"))).convert("RGB").getpixel((5, 5))[0]
+    assert red < 20 and p.image("GoboWheel 2", "Bars") and not p.image("GoboWheel 1", "Open")

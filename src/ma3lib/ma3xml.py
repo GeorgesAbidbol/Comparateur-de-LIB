@@ -373,8 +373,13 @@ def _wheels(ctx: _Ctx, src: Optional[ET.Element], out: ET.Element) -> None:
                 # comme la console : la référence au média du pool Gobos, sans le contenu
                 stem = f"[{ctx.name}_{media}_png]"
                 dep = _dependency(se, "ShowData.MediaPools.Gobos", f"'{stem}'")
-                _el(dep, "GoboImage", {"Name": stem, "Guid": _stable_guid(f"{ctx.name}/gobo/{media}"),
-                                       "FileName": f"{ctx.name}_{media}.png"})
+                gi = _el(dep, "GoboImage", {"Name": stem, "Guid": _stable_guid(f"{ctx.name}/gobo/{media}"),
+                                            "FileName": f"{ctx.name}_{media}.png"})
+                # image fournie avec le fixture (archive GDTF, section « Créer ») : contenu intégré comme
+                # pour la vignette, sinon la console n'a rien à afficher pour un fixture qu'elle ne connaît pas
+                path = _find_file(ctx.files, "wheels", media, ("png",))
+                if path:
+                    _media_block(gi, ctx.files[path])
             for facet in s.iterfind("Facet"):
                 _el(se, "Facet", {"Color": color_ma3(facet.get("Color")), "Rotation": facet.get("Rotation")})
             for extra in s:

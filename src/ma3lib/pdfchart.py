@@ -457,6 +457,11 @@ def lire_pdf(path: str | Path) -> Projet:
                        "Tu peux saisir les canaux à la main, ou m'envoyer le PDF pour que j'adapte la lecture.")
     projet = Projet(_fabricant(text), _nom(path), "", modes)
     appliquer_faits(projet, text)
+    try:
+        from .pdfimages import images_des_roues
+        images_des_roues(path, projet)
+    except Exception as exc:  # les images sont un plus : la charte lue reste utilisable
+        projet.notes.append(f"images des roues non lues ({exc})")
     for m in modes:
         addrs = sorted(a for c in m.canaux for a in c.adresses)
         missing = [a for a in range(1, addrs[-1] + 1) if a not in addrs]

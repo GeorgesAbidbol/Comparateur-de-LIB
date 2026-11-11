@@ -10,7 +10,8 @@ import copy
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QBuffer, QByteArray, QSize, Qt, Signal
+from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QCompleter, QFileDialog,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QPushButton,
                                QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
@@ -61,6 +62,17 @@ def _float(text: str) -> Optional[float]:
         return float(text.replace(",", "."))
     except ValueError:
         return None
+
+
+def _png(image: QImage, side: int = 256) -> bytes:
+    """Image réduite à `side` pixels au plus, en PNG."""
+    if max(image.width(), image.height()) > side:
+        image = image.scaled(side, side, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    data = QByteArray()
+    buf = QBuffer(data)
+    buf.open(QBuffer.WriteOnly)
+    image.save(buf, "PNG")
+    return bytes(data)
 
 
 def attribute_names() -> list[str]:
@@ -183,6 +195,7 @@ class CreerPage(QWidget):
             self.ranges.horizontalHeaderItem(col).setToolTip(
                 "Valeur physique au début / à la fin de la plage (degrés, Hz, kelvins, 0 à 1).")
         self.ranges.verticalHeader().setVisible(False)
+        self.ranges.setIconSize(QSize(30, 30))
         self.ranges.setItemDelegateForColumn(R_ATTR, _AttrDelegate(self.ranges))
         for col, width in ((R_FROM, 46), (R_TO, 46), (R_ATTR, 150), (R_PHYS0, 66), (R_PHYS1, 66)):
             self.ranges.setColumnWidth(col, width)
@@ -195,6 +208,17 @@ class CreerPage(QWidget):
         r_bar = QHBoxLayout()
         r_bar.addWidget(add_r)
         r_bar.addWidget(del_r)
+        r_bar.addSpacing(16)
+        for label, tip, slot in (
+                ("Image…", "Image de l'emplacement de roue sélectionné (gobo, couleur) : choisis un fichier image."
+                           " Les images trouvées dans la notice sont déjà posées.", self.choose_image),
+                ("Inverser", "Inverse noir et blanc : dans la console, le blanc est ce qui laisse passer la lumière.",
+                 self.invert_image),
+                ("Retirer l'image", "Retire l'image de l'emplacement sélectionné", lambda: self.set_image(None))):
+            b = QPushButton(label)
+            b.setToolTip(tip)
+            b.clicked.connect(slot)
+            r_bar.addWidget(b)
         r_bar.addStretch(1)
         right_box = QWidget()
         right_box.setFixedWidth(560)
@@ -268,6 +292,8 @@ class CreerPage(QWidget):
         finally:
             QApplication.restoreOverrideCursor()
         modes = ", ".join(f"{m.nom} ({m.empreinte})" for m in projet.modes)
+        if projet.images:
+            modes += f", {len(projet.images)} image(s) de roue"
         notes = ("   ·   À vérifier : " + " ; ".join(projet.notes)) if projet.notes else ""
         self.set_projet(projet, f"Lu dans {Path(path).name} : {len(projet.modes)} mode(s) : {modes}. "
                                 f"Vérifie les attributs proposés, puis crée le fixture.{notes}")
@@ -491,6 +517,7 @@ class CreerPage(QWidget):
         self._filling = True
         self.ranges.setRowCount(0)
         self.ranges_title.setText(f"Plages du canal {c.adresse} : {c.nom or c.attribut}" if c else "Plages du canal")
+        wheel = creation.roue_de(c.attribut) if c else ""
         if c is not None:
             self.ranges.setRowCount(len(c.plages))
             for r, p in enumerate(c.plages):
@@ -499,6 +526,11 @@ class CreerPage(QWidget):
                     item = QTableWidgetItem(text)
                     if col == R_NAME and p.groupe:
                         item.setToolTip(f"Section de la notice : {p.groupe}")
+                    png = self.projet.image(wheel, p.nom) if col == R_NAME and wheel else None
+                    if png:
+                        pix = QPixmap()
+                        pix.loadFromData(png)
+                        item.setIcon(QIcon(pix))
                     if col != R_NAME and col != R_ATTR:
                         item.setTextAlignment(Qt.AlignCenter)
                     self.ranges.setItem(r, col, item)
@@ -511,6 +543,11 @@ class CreerPage(QWidget):
         p, text = c.plages[item.row()], item.text().strip()
         col = item.column()
         if col == R_NAME:
+            wheel = creation.roue_de(c.attribut)
+            png = self.projet.image(wheel, p.nom) if wheel else None
+            if png and not self.projet.image(wheel, text):  # l'image suit l'emplacement renommé
+                self.projet.definir_image(wheel, p.nom, None)
+                self.projet.definir_image(wheel, text, png)
             p.nom = text
         elif col == R_ATTR:
             p.attribut = text or c.attribut
@@ -552,6 +589,56 @@ class CreerPage(QWidget):
         self._refresh_range_count()
         self._show_ranges()
 
+    # ------------------------------------------------------- images des roues
+
+    def _slot(self) -> Optional[tuple[str, str]]:
+        """(roue, emplacement) de la plage sélectionnée, ou None avec un message."""
+        c = self._current()
+        rows = sorted({i.row() for i in self.ranges.selectedIndexes()})
+        wheel = creation.roue_de(c.attribut) if c else ""
+        if not wheel:
+            self.status.setText("Les images vont sur les emplacements d'une roue : sélectionne un canal de roue "
+                                "(Gobo1, Color1…), puis une plage.")
+            return None
+        if len(rows) != 1 or not c.plages[rows[0]].nom.strip():
+            self.status.setText("Sélectionne une plage nommée (un emplacement de la roue).")
+            return None
+        return wheel, c.plages[rows[0]].nom
+
+    def set_image(self, png: Optional[bytes]) -> None:
+        slot = self._slot()
+        if slot is None:
+            return
+        row = self.ranges.currentRow()
+        self.projet.definir_image(slot[0], slot[1], png)
+        self._show_ranges()
+        self.ranges.selectRow(row)
+        self.status.setText(f"{slot[0]}, « {slot[1]} » : " + ("image posée." if png else "image retirée."))
+
+    def choose_image(self, path: str = "") -> None:
+        if self._slot() is None:
+            return
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(self, "Image de l'emplacement", "",
+                                                  "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)")
+        if not path:
+            return
+        image = QImage(path)
+        if image.isNull():
+            self.status.setText(f"{Path(path).name} : image illisible.")
+            return
+        self.set_image(_png(image))
+
+    def invert_image(self) -> None:
+        slot = self._slot()
+        png = self.projet.image(*slot) if slot else None
+        if slot and not png:
+            self.status.setText(f"« {slot[1]} » n'a pas d'image.")
+        if png:
+            image = QImage.fromData(png).convertToFormat(QImage.Format_RGB32)
+            image.invertPixels()
+            self.set_image(_png(image))
+
     def _refresh_range_count(self) -> None:
         rows = self._selected_rows()
         if rows:
@@ -575,7 +662,9 @@ class CreerPage(QWidget):
         self._fill()
         wheels = creation.roues(self.projet)
         extras = [f"{len(creation.emetteurs(self.projet))} émetteur(s)"] if creation.emetteurs(self.projet) else []
-        extras += [f"{w} ({len(slots)} emplacements)" for w, slots in wheels.items()]
+        extras += [f"{w} ({len(slots)} emplacements"
+                   + (f", {n} image(s)" if (n := sum(1 for s in slots if self.projet.image(w, s))) else "") + ")"
+                   for w, slots in wheels.items()]
         warn = [n for n in self.projet.notes if "canal" in n]
         self.status.setText(f"Fixture créé : {ft.manufacturer} {ft.name}, {len(ft.modes)} mode(s)"
                             + (", " + ", ".join(extras) if extras else "") + ". Ouvert dans l'atelier."

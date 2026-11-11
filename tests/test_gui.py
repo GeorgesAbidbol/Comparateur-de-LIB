@@ -497,3 +497,31 @@ def test_dmx_chart_correction_in_atelier(bad_bar, monkeypatch):
     assert rows("Body") == []
     win.undo()
     assert rows("Body") == [("Shutter1", [13])]
+
+
+def test_creer_image_d_emplacement_de_roue(tmp_path):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from ma3lib.creation import Canal, Mode, Plage, Projet
+    from ma3lib.gui.creer import CreerPage
+    page = CreerPage()
+    page.set_projet(Projet("T", "G", "", [Mode("M", [
+        Canal(1, nom="Gobo", attribut="Gobo1", plages=[Plage(0, 9, "Open"), Plage(10, 19, "Star")])])]))
+    img = QImage(600, 300, QImage.Format_RGB32)
+    img.fill(0xFFFFFFFF)
+    img.save(str(tmp_path / "star.png"))
+    page.table.selectRow(0)
+    page.ranges.selectRow(1)
+    page.choose_image(str(tmp_path / "star.png"))
+    png = page.projet.image("GoboWheel 1", "Star")
+    assert png and QImage.fromData(png).width() == 256  # réduite
+    assert not page.ranges.item(1, 2).icon().isNull()
+    page.ranges.selectRow(1)
+    page.invert_image()
+    assert QImage.fromData(page.projet.image("GoboWheel 1", "Star")).pixelColor(3, 3).red() == 0
+    page.ranges.item(1, 2).setText("Etoile")  # l'image suit le nom
+    assert page.projet.image("GoboWheel 1", "Etoile") and not page.projet.image("GoboWheel 1", "Star")
+    page.ranges.selectRow(1)
+    page.set_image(None)
+    assert not page.projet.images

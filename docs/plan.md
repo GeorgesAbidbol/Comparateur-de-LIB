@@ -53,8 +53,13 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
      canal), tableaux annexes (« Control Channel », « Virtual colors ») rattachés à leur canal.
      Les couleurs des émetteurs et des emplacements sont des valeurs TYPIQUES (`creation.EMETTEURS`,
      `creation.COULEURS`) : les notices ne donnent pas de mesures.
-   Reste : notices sans tableau tracé (texte seul), images de gobos, fréquences de strobe quand la
-   notice ne les donne pas, gélatines par catégorie (Muse : 11 tableaux), poids / puissance,
+   Images des roues (`pdfimages.py`) : sur les pages « gobo / colour wheel », les images sont
+   rattachées aux emplacements par le texte voisin, sinon dans l'ordre ; elles vivent dans le projet
+   (`Projet.images`), l'archive GDTF (`wheels/`) et l'export MA3 (contenu intégré dans `GoboImage`,
+   À VÉRIFIER dans onPC : les exports de la console ne portent que la référence au pool).
+   Dans « Créer » : boutons « Image… », « Inverser », « Retirer l'image » sur une plage de roue.
+   Reste : notices sans tableau tracé (texte seul), gobos dessinés en traits (vectoriels),
+   fréquences de strobe quand la notice ne les donne pas, gélatines par catégorie (Muse : 11 tableaux), poids / puissance,
    test d'import onPC.
 
 ## Points à vérifier sur le matériel de Jo
