@@ -8,8 +8,10 @@ GDTF Share) viendront s'ajouter ici comme sections, pas comme programmes à part
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel, QMainWindow,
                                QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
@@ -106,7 +108,15 @@ def main(argv: list[str] | None = None) -> int:
     app.setPalette(theme.palette())
     app.setStyleSheet(theme.STYLE)
     app.setFont(theme.font(10))
+    icon = Path(__file__).resolve().parent.parent / "data" / "banane-pot.ico"
+    if icon.exists():
+        app.setWindowIcon(QIcon(str(icon)))
     win = AppWindow()
+    if argv and argv[0] == "--selftest":  # contrôle de l'exe à la fabrication : la fenêtre se construit
+        win.show()
+        app.processEvents()
+        win.close()
+        return 0
     if argv and argv[0].lower().endswith(".pdf"):  # une notice glissée sur le lanceur : section « Créer »
         win.show_section("Créer")
         win.creer.load_pdf(argv[0])
