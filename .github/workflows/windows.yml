@@ -1,0 +1,57 @@
+name: Installeur Windows
+
+# Fabrique « Banane-Pot-Setup-v<version>.exe » (exe + raccourci sur le bureau) sur une machine
+# Windows, parce qu'un exe Windows ne se fabrique pas depuis Linux.
+on:
+  workflow_dispatch:  # à la main seulement : Jo veut finir l'appli avant de faire l'exe (11/11/2026)
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[gui]" pyinstaller pytest
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+      - name: Version
+        id: v
+        shell: bash
+        run: echo "version=$(python -c 'import ma3lib; print(ma3lib.__version__)')" >> "$GITHUB_OUTPUT"
+      - name: Exe (PyInstaller)
+        run: >
+          pyinstaller --noconfirm --windowed --name "Banane Pot"
+          --icon src/ma3lib/data/banane-pot.ico
+          --collect-data ma3lib --collect-data pdfminer --collect-all pypdfium2
+          --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtQml
+          --exclude-module PySide6.QtQuick --exclude-module PySide6.Qt3DCore
+          packaging/banane_pot.py
+      - name: L'exe démarre
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $p = Start-Process -FilePath "dist\Banane Pot\Banane Pot.exe" -ArgumentList "--selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Banane Pot.exe ne démarre pas (code $($p.ExitCode))" }
+      - name: Installeur (Inno Setup)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress
+            $env:Path += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          }
+          iscc "/DAppVersion=${{ steps.v.outputs.version }}" packaging\banane-pot.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Banane-Pot-Setup-v${{ steps.v.outputs.version }}
+          path: dist/Banane-Pot-Setup-v${{ steps.v.outputs.version }}.exe

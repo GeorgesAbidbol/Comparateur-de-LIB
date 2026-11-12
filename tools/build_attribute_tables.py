@@ -6,6 +6,10 @@
   (https://github.com/mvrdevelopment/spec/blob/main/gdtf-spec.md)
 - ma3_attributes.json  : attributs réellement présents dans des fixture types exportés par
   grandMA3 2.3.2.0 (liste partielle tant qu'on n'a pas l'export complet de la console).
+- ma3_attribute_defs.json : la définition complète écrite par la console pour ces attributs
+  (Special, Color, NaturalReadout…), reprise telle quelle par l'export XML MA3.
+
+    python tools/build_attribute_tables.py --defs fixture_ma3.xml ...   (réutilise gdtf_attributes.json)
 """
 
 import json
@@ -31,6 +35,23 @@ def gdtf_table(spec: Path) -> dict:
     return out
 
 
+def _standard(gdtf: dict):
+    pats = [re.compile("^" + re.escape(k).replace(r"\(n\)", r"\d+").replace(r"\(m\)", r"\d+") + "$", re.I)
+            for k in gdtf]
+    return lambda a: bool(a.get("Special")) or any(
+        p.match(a.get("Name", "").replace("ColorRGB_", "ColorAdd_")) for p in pats)
+
+
+def ma3_definitions(files: list[Path], gdtf: dict) -> dict:
+    is_std = _standard(gdtf)
+    out = {}
+    for f in files:
+        for a in ET.parse(f).getroot().iter("Attribute"):
+            if is_std(a):
+                out.setdefault(a.get("Name"), dict(a.attrib))
+    return dict(sorted(out.items()))
+
+
 def ma3_table(files: list[Path], gdtf: dict) -> dict:
     """On ne garde que les attributs standard (motif GDTF, après renommage MA3 ColorRGB_ -> ColorAdd_)
     ou marqués Special par la MA3 : les attributs maison des fabricants ne prouvent rien."""
@@ -54,6 +75,12 @@ def ma3_table(files: list[Path], gdtf: dict) -> dict:
 
 if __name__ == "__main__":
     DATA.mkdir(parents=True, exist_ok=True)
+    if sys.argv[1] == "--defs":
+        g = json.loads((DATA / "gdtf_attributes.json").read_text(encoding="utf-8"))
+        d = ma3_definitions([Path(p) for p in sys.argv[2:]], g)
+        (DATA / "ma3_attribute_defs.json").write_text(json.dumps(d, indent=1, ensure_ascii=False), encoding="utf-8")
+        print(f"MA3 (définitions) : {len(d)} attributs")
+        sys.exit(0)
     g = gdtf_table(Path(sys.argv[1]))
     (DATA / "gdtf_attributes.json").write_text(json.dumps(g, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"GDTF : {len(g)} attributs")

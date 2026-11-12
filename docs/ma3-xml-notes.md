@@ -18,7 +18,7 @@ Ce n'est **pas** du GDTF, mais c'est très proche (même arbre, autres noms).
 | Canal par défaut | `InitialFunction` | `DefaultChannelFunction="Dimmer.DIMMER"` |
 | Mode | `Name`, `Geometry` | + `XYZ="No"`, `DiveInto="Yes"` |
 | Images | fichiers du zip | intégrées en Base64 (`<Block Base64=…>`, `DependencyExport`) |
-| Grille | — | `GridAuto`, `GridX/Y/Z` sur les géométries |
+| Grille | — | `GridAuto` (`Auto` ou `Manual`), `GridX/Y/Z` sur les géométries, place relative aux sœurs |
 
 Attributs renommés par MA3 à l'import :
 `ColorAdd_R/G/B/CW` → `ColorRGB_R/G/B/CW`, `ColorSub_C/M/Y` → `ColorRGB_R/G/B`.
@@ -82,3 +82,26 @@ Règles MA3 associées (vérifiées sur la console de Jo, 2.3.2.0) :
 - **on garde toujours les Beam** de l'arbre d'un mode, même sans canal : la console
   s'en sert pour apparier les instances. Pour copier une prog d'un fixture à un autre,
   **types de géométrie et attributs doivent correspondre** (règle clé du comparateur).
+
+## Conversion GDTF -> MA3 (étape 4, `ma3lib/ma3xml.py`)
+
+Apprise le 10/11/2026 sur les paires de Jo (GDTF Share + export console 2.3.2.0). Sur
+l'iTetra2 (mode non retouché), le fichier converti a les **mêmes instances et adresses
+dans tous les modes** que l'export console, et le même XML à part les Guid, la grille Auto
+et la définition de 2 attributs maison. Les autres paires (Esprite, Color Strike, JDC)
+ne diffèrent que par les retouches de Jo.
+
+| Élément | Règle |
+|---|---|
+| Valeur DMX | `v/n` -> `floor(v × FFFFFF / (2^(8n)−1))` en hexa 6 chiffres (`32768/2` -> `80007F`). Canal virtuel : passage par un % à 2 décimales (`655/2` -> `028F5C`). |
+| Valeur absente | `DMXFrom` 0, `PhysicalFrom` 0, `PhysicalTo` 1, `Master="None"`, `Snap="No"`, `RealFade` 0 : non écrits. |
+| Attributs | `ColorAdd_*` -> `ColorRGB_*`. `ColorSub_C/M/Y` -> `ColorRGB_R/G/B` avec `DMXInvert="Yes"`, `Default` et `Highlight` inversés. Attributs d'usine : définition de la console (`data/ma3_attribute_defs.json`). |
+| Canal | `Offset="1,2"` -> `Coarse="1" Fine="2"` ; `InitialFunction="Geo_Attr.LC.CF"` -> `DefaultChannelFunction="LC.CF"` ; géométrie en chemin pointé, nom simple pour un modèle référencé. |
+| Physique | `AngularSpeed` en rad/s (°/s × π/180). Index de roue (fonction avec `Wheel`, sans unité) : 0 … nombre d'emplacements. |
+| Géométries | Matrice -> `PosX/PosY/PosZ` (4 décimales, 0 non écrit), `GridAuto="Auto"`, modèles de référence écrits en premier. Beam : `LuminousFlux` -> `LuminousIntensity`, `ThrowRatio` recalculé `1/(2 tan(BeamAngle/2))`, angles de 25° non écrits. |
+| Break | `DMXOffset` -> `DMXPatch` (1 non écrit). |
+| Couleurs | CIE xyY -> RGB linéaire (`Color="r,g,b,1"`, 10 décimales). |
+| Physique (roues, filtres, émetteurs) | `Filters` -> `FTFilters/FTFilter` + `MeasurementFilter`, `Measurement` -> `MeasurementEmitter`, `Properties` -> `PhysicalProperties/PhysicalPropertiesData`, `ColorSpace` -> `ColorSpaceCollect`. |
+| Médias | vignette et maillages glb/3ds intégrés en Base64 (blocs de 1024 octets, `USERMESH/…`, `USERSYMBOL/…`) ; primitives Cube / Cylinder / Pigtail = maillages génériques de la console. Gobos : référence au pool Gobos sans contenu, comme la console. |
+| Divers | `Revision Date` en `jj.mm.aaaa hh:mm:ss`, `FTRDM` -> `RDMFixtureType` (ID sans `0x`), chaque mode reçoit `SoftwareVersions` et `FTPresets`. |
+| Break `Overwrite` | Si toutes les références du modèle n'ont qu'un Break dans l'arbre du mode, le canal prend le numéro de ce Break au lieu de `DMXBreak="Overwrite"` : sur onPC 2.3.2.0, Overwrite avec un seul Break ne décale pas les références (conflit « tous les pixels à la même adresse », iTetra2 TEST, 11/11/2026). Avec deux Breaks, la console garde `Overwrite` (export de Jo). |

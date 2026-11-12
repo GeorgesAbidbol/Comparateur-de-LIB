@@ -3,6 +3,42 @@
 Sources : spec GDTF 1.2 (github.com/mvrdevelopment/spec) et aide GDTF Share
 (https://gdtf-share.com/help/), lue le 31/10/2026.
 
+## Géométrie, géométrie référence, type de géométrie (règles de Jo, 10/11/2026)
+
+Trois notions à ne pas mélanger :
+
+- **Géométrie** : un nœud de l'arbre physique du fixture (nom unique). Elle peut porter
+  des canaux ; sur la console, une géométrie qui porte des canaux devient une instance
+  (1.x.x). Les niveaux sans canal se fondent dans le parent.
+- **Type de géométrie** : la balise du nœud (`Geometry`, `Axis`, `Beam`, `FilterColor`…).
+  Il dit *ce qu'est* la pièce : `Axis` bouge (pan / tilt), `Geometry` est un contenant
+  (ex. la tête), `Beam` est la sortie de lumière. **Le `Beam` ne sert qu'à la 3D et à la
+  simulation de lumière** : sur la console il ne porte rien, ce sont la tête (ou le
+  segment, le pixel…) qui portent Dimmer, couleur, strobe… Le Beam est en général un
+  enfant sans canal de cette géométrie. Il ne faut pas le supprimer (on perdrait la
+  lumière en 3D), mais il ne crée pas d'instance.
+- **Géométrie référence** (`GeometryReference`) : **un exemplaire de plus d'un même type
+  d'instance**. Dès qu'un même type d'instance se répète, on décrit une seule fois le
+  modèle (géométrie de premier niveau, avec ses enfants et ses canaux en adresses
+  relatives) et on le pose N fois par des références, chacune avec son `<Break DMXOffset>`.
+  Ce n'est **pas lié au pixel** : à n'importe quel étage. Exemples de Jo :
+  masters de segment A et B du JDC Line 1000 (même type d'instance → un modèle, deux
+  références), un projecteur à 12 têtes tilt → un seul modèle de tête, 12 références,
+  2 × 20 pixels RGBW → un modèle de pixel, références à adresses contiguës.
+  Une référence n'a pas d'enfant à elle : ce qui est « sous » elle sur la console vient
+  de son modèle, et son type est celui de la racine du modèle.
+
+Un seul arbre pour plusieurs modes (méthode de l'iTetra2, la bonne selon Jo) : chaque
+référence de pixel a **deux Break**, `DMXBreak="1" DMXOffset="5"` puis `DMXBreak="1"
+DMXOffset="4"` (P02). Le mode choisit par ses canaux : en RGBW (pas de 4) les canaux du
+modèle sont en `DMXBreak="1"` → premier Break ; en RGB (pas de 3) ils sont en
+`DMXBreak="Overwrite"` → dernier Break (règle de la spec). Les adresses des pixels sont
+donc dans les références, le mode ne fait que choisir laquelle.
+
+Conséquences pour l'atelier : regrouper des géométries identiques en modèle + références,
+dupliquer une référence N fois à adresses contiguës, et pouvoir ranger (glisser-déposer)
+aussi à l'intérieur des modèles.
+
 ## Pourquoi les multi-instances sont souvent mal faites
 
 Dans le GDTF Builder, **« Duplicate » / « Multiple Duplication » crée des copies**
@@ -50,14 +86,20 @@ Les GDTF Robe servent d'étalon. Exemple Robin Esprite (GDTF 1.2) :
 1 (2)  Base [Geometry]            canaux généraux (Control1, vitesses, LEDFrequency…)
   1 (1)  Yoke [Axis]              Pan
     1 (1)  Head [Axis]            Tilt + toutes les fonctions optiques + Dimmer
-      1      Beam [Beam]          aucun canal, gardé (repère console)
+      1      Beam [Beam]          aucun canal : retiré par « Retirer la 3D »
   2 (6)  Pigtail [Geometry]       connecteurs (WiringObject) : pur 3D
 ```
 
 - Noms de géométries courts et en anglais : Base, Yoke, Head, Beam.
 - Canaux nommés `<Géométrie>_<Attribut>` (Yoke_Pan, Head_Tilt).
 - Un mode = une racine (Base), pas de copie d'arbre par mode.
-- Connecteurs regroupés sous un « Pigtail » : seul élément à supprimer au nettoyage.
+- Connecteurs regroupés sous un « Pigtail ».
+
+**Règle de Jo (10/11/2026)** : la 3D ne l'intéresse pas, elle encombre les librairies, la
+lecture des géométries et le patch des références. « Retirer la 3D » (atelier,
+`geotree.strip_3d`) supprime toute géométrie qui ne porte aucun canal dans les modes qui
+l'utilisent : Beams vides, câblage, références de pixels sans canal (ex. les 19 LED du mode
+Standard du Nando 502, qui gardent leurs canaux en mode Pixel). Canaux et adresses ne bougent pas.
 
 À vérifier : comment MA3 présente les Axis (Yoke/Head) dans le SubfixtureOverview.
 
@@ -84,3 +126,21 @@ Lens Flower Pixel [Beam]
 - Les zones (Zoom 1 / Zoom 2) regroupent de vrais pixels références : ce ne sont
   pas des « copies » à convertir (corrigé dans le diagnostic).
 - `ma3lib check` ne relève que les deux Pigtails.
+
+## Une base par mode (règle de Jo, 11/11/2026)
+
+Pour un fixture **multi-instances**, chaque mode a sa propre base : « souvent les
+arborescences ne sont pas les mêmes » d'un mode à l'autre (8 bits, pixel, 2U). Un arbre
+partagé oblige à plusieurs Breaks par référence et à `DMXBreak="Overwrite"` (iTetra2), ce qui
+brouille le patch des références.
+
+Ce qui reste commun : **les briques**. Même modèle de base, d'axis, de head, de pixel, et
+mêmes modèles de référence d'un mode à l'autre. Cette règle remplace « un seul arbre pour
+tous les modes » ; elle garde « on réutilise les mêmes modèles ».
+
+Atelier : bouton « Une base par mode » (`geotree.split_per_mode`, GDTF). Le premier mode
+garde l'arbre d'origine, les autres reçoivent une copie ; toutes les géométries prennent en
+suffixe le nom du mode donné par le fabricant (`Base Mode 3-Pixel RGB`, choix de Jo) ; chaque
+référence ne garde que les Breaks de son mode ; canaux, liens et adresses suivent. Un fixture
+sans sous-instance (Esprite) garde sa base unique. Ensuite « Retirer la 3D » élague chaque
+base selon son mode.

@@ -191,6 +191,29 @@ def cmd_targets(args) -> int:
     return 0
 
 
+def cmd_export(args) -> int:
+    from . import ma3xml
+    ft = gdtf.load(args.file)
+    if args.dossier:
+        folder = Path(args.dossier)
+    else:
+        kind = "usb" if args.cle else "onpc" if args.onpc else ""
+        targets = [t for t in ma3_paths.find_targets() if not kind or t.kind == kind]
+        if not targets:
+            print("Aucune destination MA3 trouvée : précise un dossier (--dossier).")
+            return 1
+        folder = targets[0].fixture_dir
+    try:
+        out = ma3xml.export(ft, folder, name=args.nom or None,
+                            guid=ma3xml.new_guid() if args.nouveau_guid else None,
+                            note=args.note, overwrite=args.remplacer)
+    except FileExistsError as exc:
+        print(f"{exc} existe déjà (--remplacer pour l'écraser)")
+        return 1
+    print(f"Écrit : {out}")
+    return 0
+
+
 def cmd_share_search(args) -> int:
     from .gdtf_share import GdtfShareClient, search
     for e in search(GdtfShareClient().list(), " ".join(args.words))[:50]:
@@ -210,7 +233,7 @@ def cmd_share_get(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="ma3lib", description="Comparateur de LIB grandMA3 (GDTF)")
+    p = argparse.ArgumentParser(prog="ma3lib", description="Banane Pot : librairies grandMA3 (GDTF, XML MA3)")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("info"); s.add_argument("file"); s.set_defaults(func=cmd_info)
     s = sub.add_parser("check"); s.add_argument("files", nargs="+"); s.set_defaults(func=cmd_check)
@@ -230,6 +253,13 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--groupe", action="append", metavar="ATTR=ActivationGroup", help="ATTR=- pour retirer")
     s.set_defaults(func=cmd_remap)
     s = sub.add_parser("targets"); s.set_defaults(func=cmd_targets)
+    s = sub.add_parser("export", help="écrire le fixture en XML MA3 2.3.2.0")
+    s.add_argument("file")
+    s.add_argument("--dossier", default="", help="dossier de destination (défaut : onPC ou clé trouvée)")
+    s.add_argument("--onpc", action="store_true"); s.add_argument("--cle", action="store_true")
+    s.add_argument("--nom", default=""); s.add_argument("--note", default=None)
+    s.add_argument("--nouveau-guid", action="store_true"); s.add_argument("--remplacer", action="store_true")
+    s.set_defaults(func=cmd_export)
     s = sub.add_parser("share-search"); s.add_argument("words", nargs="+"); s.set_defaults(func=cmd_share_search)
     s = sub.add_parser("share-get"); s.add_argument("rid", type=int); s.add_argument("dest", nargs="?", default="gdtf")
     s.set_defaults(func=cmd_share_get)

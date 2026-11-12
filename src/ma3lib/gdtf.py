@@ -152,6 +152,8 @@ class FixtureType:
     modes: list[DMXMode] = field(default_factory=list)
     source: Optional[Path] = None
     xml_root: Optional[ET.Element] = field(default=None, repr=False)
+    # fichiers ajoutés par l'atelier (meshes pris dans un autre GDTF), comme dans l'archive
+    extra_files: dict[str, bytes] = field(default_factory=dict, repr=False)
 
     def all_geometries(self) -> Iterator[Geometry]:
         for root in self.geometries:
@@ -183,7 +185,8 @@ class FixtureType:
 def load(path: str | Path) -> FixtureType:
     """Charge un .gdtf, un description.xml seul, ou un fixture type MA3 (.xml)."""
     path = Path(path)
-    if path.suffix.lower() == ".xml":
+    if path.suffix.lower() == ".xml" or (path.is_file() and not zipfile.is_zipfile(path)
+                                         and path.read_bytes()[:64].lstrip(b"\xef\xbb\xbf \r\n\t").startswith(b"<")):
         data = path.read_bytes()
     else:
         try:

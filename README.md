@@ -1,4 +1,6 @@
-# Comparateur de LIB
+# Banane Pot
+
+(Nom de l'appli, choisi par Jo. Le dépôt et le paquet Python gardent leurs noms : `Comparateur-de-LIB`, `ma3lib`.)
 
 Outil de bureau (Windows) pour **comparer, nettoyer et préparer les librairies
 GDTF de grandMA3**, sur le modèle de Fixture Fix (qui ne gère que grandMA2).
@@ -17,7 +19,7 @@ Version cible : **grandMA3 2.3.2.0**.
 
 ## État : étape 1 (fondations)
 
-Pour l'instant, une ligne de commande. L'interface graphique arrive à l'étape 2.
+Une ligne de commande, et le début de l'interface graphique (étape 2, voir plus bas).
 
 ```
 pip install -e .
@@ -50,3 +52,78 @@ GDTF Share : mettre ses identifiants dans les variables d'environnement
 pip install pytest
 python -m pytest
 ```
+
+## Étape 2 : interface graphique (en cours, affichage seulement)
+
+```
+pip install -e .[gui]
+ma3lib-gui                                   # ou : python -m ma3lib.gui
+ma3lib-gui source.gdtf cible.xml             # ouvre directement deux fichiers
+```
+
+- En haut : Source et Cible (GDTF ou XML MA3, ou glisser le fichier sur la moitié voulue)
+  et leur mode. Rien d'autre.
+- Au centre : les instances en escalier, comme le SubfixtureOverview / Fixture Hero
+  de MA3 (1, 1.1, 1.1.1…). Les lignes relient chaque instance cible à son instance source,
+  proposées au chargement d'après les attributs communs. On tire une ligne pour rebrancher,
+  clic droit pour débrancher, flèche pour replier.
+- Double-clic sur une liaison : les attributs de la paire, avec pastilles et Coarse/Fine.
+  Vert = des deux côtés, orange = perdu (source) ou absent (cible), jaune = remplacé,
+  bleu = virtuel.
+- En bas : légende et nombre d'instances cible branchées.
+
+Captures : `docs/captures/`.
+
+Atelier géométries (étape 3, en cours) : `python -m ma3lib.gui.atelier fichier.gdtf [mode]`.
+Arbre complet du mode avec les numéros de sélection MA3 (1.x.x.x), les géométries 3D seules
+et les modèles en double, et les paramètres de la géométrie choisie (lecture seule pour
+l'instant). **Glisser-déposer** : lâcher sur le milieu d'une ligne = enfant, sur le haut ou
+le bas = avant / après ; Ctrl/Maj pour plusieurs ; les numéros se recalculent en direct ;
+Ctrl+Z annule. Le déplacement suit dans l'XML d'origine (et les chemins des canaux MA3).
+Clic droit : **regrouper** des géométries identiques (copies) en un modèle + des références
+(même nom, même position, mêmes adresses : la console voit les mêmes instances) et
+**fusionner** les modèles en double d'un mode à l'autre. Les copies à regrouper sont
+marquées « copie ×N ». **Dupliquer** une référence N fois à adresses contiguës (pas proposé
+d'après le modèle, un par jeu d'adresses comme sur l'iTetra2 ; alerte si une copie tombe sur
+des adresses déjà prises). Sous l'arbre du mode, ses **modèles** (« modèle ×N ») : ce qu'on y range vaut pour toutes
+leurs références (ex. pixels rangés sous le master une fois pour A et B). On range à
+l'intérieur d'un même arbre. **Double-clic** : popup nom / type / adresse (un champ par jeu
+d'adresses d'une référence, ou premier canal dans le mode) / grille (proposée d'après la 3D).
+Regrouper, fusionner et dupliquer : GDTF seulement pour l'instant.
+
+## Lancer sous Windows
+
+Une seule appli : double-clic sur `Banane Pot.bat`. Le premier lancement installe
+Python 3.12 avec winget s'il manque, crée `.venv` et installe PySide6. La fenêtre a une section
+par outil (Atelier, Comparateur) ; les prochains outils s'y ajouteront. On peut glisser un
+`.gdtf` ou un `.xml` sur le lanceur pour l'ouvrir dans l'atelier. Ailleurs : `python -m ma3lib.gui`.
+
+## Étape 4 : exporter pour grandMA3 2.3.2.0
+
+Bouton **Exporter…** en bas de l'atelier : nom, note (ex. « JO »), GUID (gardé, ou nouveau
+dès que le nom change), destination (onPC ou clé USB trouvées, à côté de l'original, ou un
+dossier). Fichier `fabricant@nom.xml`, au format XML MA3 2.3.2.0 comme un export « User » de
+la console : un GDTF est converti (règles dans `docs/ma3-xml-notes.md`), un XML MA3 est
+réécrit tel quel avec les modifications de l'atelier.
+
+```
+python -m ma3lib export fichier.gdtf --dossier D:\lib [--nom "…" --note JO --nouveau-guid --remplacer]
+python -m ma3lib export fichier.gdtf --onpc        # ou --cle
+```
+
+## Étape 5 : créer un fixture de zéro
+
+Section **Créer** de l'appli. Deux façons de partir, qui se combinent :
+
+- **Glisser la notice PDF** du fabricant sur la zone en pointillés (ou sur « Banane Pot.bat ») :
+  la charte DMX est lue toute seule (modes, canaux, Fine, plages, valeurs par défaut) et un
+  attribut grandMA3 est proposé pour chaque canal.
+- **Saisir à la main** : « + Mode », « + Canal », puis adresse, Fine, nom, attribut, géométrie.
+  Pour des pixels ou des têtes identiques, saisir les canaux de la première instance, leur donner
+  un nom de géométrie (ex. `Pixel`) et un nombre de **copies** : on obtient un modèle + N
+  références aux adresses qui se suivent.
+
+« Créer le fixture → Atelier » ouvre le résultat dans l'atelier (géométries, puis « Exporter… »
+en XML MA3). « Enregistrer le projet… » garde la saisie (`.bpot.json`).
+Seules les chartes en tableaux tracés sont lues ; pour une notice mal lue, corriger dans le
+tableau ou envoyer le PDF pour adapter `pdfchart.py`.
