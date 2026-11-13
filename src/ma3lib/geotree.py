@@ -755,7 +755,7 @@ def duplicate(ft: FixtureType, ref: Geometry, count: int,
         new.set("Name", name)
         for b_el, step in zip(new.iterfind("Break"), steps):
             off = int(b_el.get("DMXOffset") or b_el.get("DMXPatch") or 1) + k * step
-            b_el.set("DMXPatch" if b_el.get("DMXPatch") is not None else "DMXOffset", str(off))
+            b_el.set("DMXPatch" if ft.format == "ma3" else "DMXOffset", str(off))
         parent_el.insert(pos + k, new)
     new_ft = restore(ft, ET.tostring(ft.xml_root, encoding="utf-8"))
     msg = f"« {ref.name} » dupliquée {count} fois ({names[0]} … {names[-1]}, pas {'/'.join(map(str, steps))})"
@@ -965,7 +965,7 @@ def apply_edit(ft: FixtureType, g: Geometry, e: Edit) -> tuple[FixtureType, str]
         done.append(f"mesh {e.mesh or 'retiré'}")
     if e.breaks is not None:
         for b_el, off in zip(el.iterfind("Break"), e.breaks):
-            b_el.set("DMXPatch" if b_el.get("DMXPatch") is not None else "DMXOffset", str(off))
+            b_el.set("DMXPatch" if ft.format == "ma3" else "DMXOffset", str(off))
         done.append("adresse " + " / ".join(map(str, e.breaks)))
     if shift:
         for mode_el in node.iterfind("DMXModes/DMXMode"):

@@ -316,3 +316,16 @@ def test_split_per_mode_on_ma3(tmp_path):
     rings = [new.geometry(f"Ring {i} Extended") for i in (1, 2, 3)]
     grouped, _ = geotree.group(new, rings, "Ring")
     assert [a for _, a in _rings(grouped)] == [a for _, a in before["Extended"]]
+
+
+def test_ma3_empty_break_gets_dmxpatch(tmp_path):
+    """XML MA3 : un <Break/> vide (adresse 1) prend DMXPatch, jamais DMXOffset (attribut GDTF)."""
+    ft = _ma3_wash(tmp_path)
+    ft, _ = geotree.group(ft, [ft.geometry("Ring 1")], "Ring")
+    el = geotree.element_of(ft, ft.geometry("Ring 1")).find("Break")
+    el.attrib.clear()  # comme la console : premier pixel en <Break/>
+    ft = geotree.restore(ft, geotree.snapshot(ft))
+    new, _ = geotree.apply_edit(ft, ft.geometry("Ring 1"), geotree.Edit(breaks=[40]))
+    assert geotree.element_of(new, new.geometry("Ring 1")).find("Break").attrib == {"DMXPatch": "40"}
+    dup, _ = geotree.duplicate(new, new.geometry("Ring 1"), 1, [4])
+    assert not any(b.get("DMXOffset") for b in dup.xml_root.iter("Break"))
