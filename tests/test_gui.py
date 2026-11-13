@@ -657,6 +657,13 @@ def test_double_clic_montre_tous_les_canaux(tmp_path, monkeypatch):
     dlg._channel_asked("Head", "Tilt")
     rows = atelier.charte_dmx.lignes(win.ft, "Extended", win.ft.geometry("Head"))
     assert [r.offsets for r in rows] == [[20]]
+    # ajouter puis retirer un Dimmer virtuel (Jo) depuis la même fenêtre
+    monkeypatch.setattr(atelier.ChannelDialog, "values", lambda self: ("Dimmer", [], ""))
+    dlg._channel_asked("Head", "")
+    assert any(t.startswith("virtuel  Dimmer") for t in dlg.channel_texts())
+    dlg.channels.setCurrentCell([t.startswith("virtuel") for t in dlg.channel_texts()].index(True), 0)
+    dlg._remove_clicked()
+    assert not any("Dimmer" in t for t in dlg.channel_texts())
     assert any(t.startswith("20 ") for t in dlg.channel_texts())
     dlg.close()
     win.close()

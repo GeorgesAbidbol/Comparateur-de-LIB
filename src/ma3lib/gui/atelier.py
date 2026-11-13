@@ -890,9 +890,12 @@ class EditDialog(QDialog):
             add.clicked.connect(lambda: self._channel_asked(charte_dmx.carrier(g), ""))
             mod = QPushButton("Modifier…")
             mod.clicked.connect(lambda: self._channel_clicked(self.channels.item(self.channels.currentRow(), 0)))
+            rem = QPushButton("Retirer")
+            rem.clicked.connect(self._remove_clicked)
             row.addWidget(add)
             row.addStretch(1)
             row.addWidget(mod)
+            row.addWidget(rem)
             form.addRow(row)
             self._fill_channels()
 
@@ -925,9 +928,14 @@ class EditDialog(QDialog):
         if item is not None:
             self._channel_asked(*item.data(Qt.UserRole))
 
-    def _channel_asked(self, geo: str, attribute: str) -> None:
-        if self._on_channel is not None and self._on_channel(geo, attribute):
+    def _channel_asked(self, geo: str, attribute: str, what: str = "") -> None:
+        if self._on_channel is not None and self._on_channel(geo, attribute, what):
             self._fill_channels()
+
+    def _remove_clicked(self) -> None:
+        item = self.channels.item(self.channels.currentRow(), 0)
+        if item is not None:
+            self._channel_asked(*item.data(Qt.UserRole), "remove")
 
     def edit(self) -> "geotree.Edit":
         e = geotree.Edit()
