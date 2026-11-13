@@ -151,6 +151,88 @@ def _rewrite_paths(ft: FixtureType, renames: dict[str, str]) -> None:
 # son adresse (Break). La référence garde le nom et la position de la géométrie qu'elle
 # remplace : la console voit les mêmes instances, aux mêmes adresses.
 
+# --------------------------------------------------------------------------
+# GDTF et XML MA3 : mêmes opérations, écritures différentes
+#   position   GDTF Position="{…}"            MA3 PosX/PosY/PosZ/RotX/RotY/RotZ
+#   Break      DMXOffset + DMXBreak            MA3 DMXPatch (absent = 1), DMXBreak (absent = 1)
+#   canal      Offset="1,2", Geometry=nom      MA3 Coarse/Fine/Ultra/Uber, Geometry=chemin pointé
+#              (un modèle de référence et ses enfants : « Modèle », « Modèle.Enfant »)
+
+_MA3_POS = ("PosX", "PosY", "PosZ", "RotX", "RotY", "RotZ")
+_MA3_BYTES = ("Coarse", "Fine", "Ultra", "Uber")
+
+
+def _pos_keys(ft: FixtureType) -> tuple[str, ...]:
+    return _MA3_POS if ft.format == "ma3" else ("Position",)
+
+
+def _ref_keys(ft: FixtureType) -> tuple[str, ...]:
+    """Attributs qu'une géométrie transmet à la référence qui la remplace."""
+    if ft.format == "ma3":
+        return ("Name",) + _MA3_POS + ("GridAuto", "GridX", "GridY", "GridZ")
+    return ("Name", "Position", "Model")
+
+
+def _add_break(ft: FixtureType, ref: ET.Element, offset: int, dmx_break: int) -> None:
+    if ft.format == "ma3":
+        attrs = {}
+        if offset != 1:
+            attrs["DMXPatch"] = str(offset)
+        if dmx_break != 1:
+            attrs["DMXBreak"] = str(dmx_break)
+        ET.SubElement(ref, "Break", attrs)
+    else:
+        ET.SubElement(ref, "Break", {"DMXOffset": str(offset), "DMXBreak": str(dmx_break)})
+
+
+def _ch_geo(ft: FixtureType, ch: ET.Element) -> str:
+    """Nom de la géométrie d'un canal (dernier maillon du chemin MA3)."""
+    geo = ch.get("Geometry", "")
+    return geo.split(".")[-1] if ft.format == "ma3" else geo
+
+
+def _geo_link(ft: FixtureType, path: list[str]) -> str:
+    """Ce qu'un canal écrit pour désigner la géométrie au bout de `path` (noms depuis la racine)."""
+    return ".".join(path) if ft.format == "ma3" else path[-1]
+
+
+def _ch_offsets(ft: FixtureType, ch: ET.Element) -> Optional[list[int]]:
+    if ft.format == "ma3":
+        offs = [int(ch.get(k)) for k in _MA3_BYTES if ch.get(k)]
+        return offs or None
+    off = (ch.get("Offset") or "None").strip()
+    return None if off in ("None", "") else [int(o) for o in off.split(",")]
+
+
+def _shift_offsets(ft: FixtureType, ch: ET.Element, delta: int) -> bool:
+    """Décale les adresses d'un canal ; False pour un canal virtuel (sans adresse)."""
+    offs = _ch_offsets(ft, ch)
+    if not offs:
+        return False
+    if ft.format == "ma3":
+        for k, o in zip(_MA3_BYTES, offs):
+            ch.set(k, str(o + delta))
+    else:
+        ch.set("Offset", ",".join(str(o + delta) for o in offs))
+    return True
+
+
+def _new_reference(ft: FixtureType, el: ET.Element, model_name: str) -> ET.Element:
+    ref = ET.Element("GeometryReference", {k: v for k, v in el.attrib.items() if k in _ref_keys(ft)})
+    ref.set("Geometry", model_name)
+    return ref
+
+
+def _add_model(ft: FixtureType, model_el: ET.Element) -> None:
+    """Pose un nouveau modèle au premier niveau (MA3 : en tête, comme l'écrit la console)."""
+    geos = ft.xml_root.find("FixtureType/Geometries")
+    if ft.format == "ma3":
+        model_el.tail = geos[0].tail if len(geos) else model_el.tail
+        geos.insert(0, model_el)
+    else:
+        geos.append(model_el)
+
+
 def snapshot(ft: FixtureType) -> bytes:
     """Copie de l'XML, pour annuler une opération en le relisant."""
     return ET.tostring(ft.xml_root, encoding="utf-8")
@@ -195,7 +277,7 @@ def _inline_references(ft: FixtureType, el: ET.Element) -> None:
                 continue
             inline = copy.deepcopy(tpl)
             inline.set("Name", child.get("Name", ""))
-            for k in ("Position", "Model"):
+            for k in _pos_keys(ft) + ("Model",):
                 if child.get(k):
                     inline.set(k, child.get(k))
             inline.tail = child.tail
@@ -211,8 +293,8 @@ def plan_group(ft: FixtureType, geos: list[Geometry], model_name: str) -> _Plan:
     """Vérifie qu'on peut regrouper `geos` et calcule les adresses. Lève MoveError sinon."""
     from .diagnostic import _signature  # même empreinte que le diagnostic (numéros ignorés)
 
-    if ft.format != "gdtf":
-        raise MoveError("regrouper n'est fait pour l'instant que sur un GDTF (pas encore sur un XML MA3)")
+    if ft.xml_root is None:
+        raise MoveError("fixture sans arbre XML")
     if not geos:
         raise MoveError("aucune géométrie choisie")
     if not model_name or ft.geometry(model_name) is not None:
@@ -303,24 +385,26 @@ def group(ft: FixtureType, geos: list[Geometry], model_name: str) -> tuple[Fixtu
     first_el = element_of(ft, geos[0])
     model_el = copy.deepcopy(first_el)
     model_el.set("Name", model_name)
-    model_el.attrib.pop("Position", None)  # la position reste sur chaque référence
+    for k in _pos_keys(ft):  # la position reste sur chaque référence
+        model_el.attrib.pop(k, None)
     _inline_references(ft, model_el)
-    node.find("Geometries").append(model_el)
+    # chemin de chaque géométrie du premier arbre une fois dans le modèle (MA3)
+    depth = len(names_path(geos[0]))
+    links = {x.name: _geo_link(ft, [model_name] + names_path(x)[depth:]) for x in trees[0]}
 
     # 2. chaque géométrie devient une référence (même nom, même position, même rang)
     for k, (g, base) in enumerate(zip(geos, plan.bases)):
         el = element_of(ft, g)
         parent_el = element_of(ft, g.parent)
-        ref = ET.Element("GeometryReference", {k: v for k, v in el.attrib.items()
-                                               if k in ("Name", "Position", "Model")})
-        ref.set("Geometry", model_name)
-        ET.SubElement(ref, "Break", {"DMXOffset": str(base), "DMXBreak": str(plan.dmx_break)})
+        ref = _new_reference(ft, el, model_name)
+        _add_break(ft, ref, base, plan.dmx_break)
         if plan.bases2:
-            ET.SubElement(ref, "Break", {"DMXOffset": str(plan.bases2[k]), "DMXBreak": str(plan.dmx_break)})
+            _add_break(ft, ref, plan.bases2[k], plan.dmx_break)
         ref.tail = el.tail
         i = list(parent_el).index(el)
         parent_el.remove(el)
         parent_el.insert(i, ref)
+    _add_model(ft, model_el)
 
     # 3. les canaux : ceux de la première géométrie passent sur le modèle en adresses
     #    relatives, ceux des copies disparaissent (le modèle les porte pour toutes)
@@ -331,19 +415,15 @@ def group(ft: FixtureType, geos: list[Geometry], model_name: str) -> tuple[Fixtu
         second = plan.overwrite_modes and mode_el.get("Name") in plan.overwrite_modes
         base0 = plan.bases2[0] if second else plan.bases[0]
         for ch in list(chans_el):
-            geo = ch.get("Geometry", "")
+            geo = _ch_geo(ft, ch)
             if geo not in all_names:
                 continue
             if geo not in first_names:
                 chans_el.remove(ch)
                 continue
-            if geo == geos[0].name:
-                ch.set("Geometry", model_name)
-            off = (ch.get("Offset") or "None").strip()
-            if off not in ("None", ""):
-                ch.set("Offset", ",".join(str(int(o) - base0 + 1) for o in off.split(",")))
-                if second:
-                    ch.set("DMXBreak", "Overwrite")
+            ch.set("Geometry", links[geo])
+            if _shift_offsets(ft, ch, 1 - base0) and second:
+                ch.set("DMXBreak", "Overwrite")
         # liens (InitialFunction, relations…) : vers les canaux du modèle, sans doublons
         from .remap import LINK_ATTRS
         for el in mode_el.iter():
@@ -380,8 +460,6 @@ def to_reference(ft: FixtureType, geos: list[Geometry], model_name: str) -> tupl
     from .diagnostic import _signature
     from .remap import LINK_ATTRS
 
-    if ft.format != "gdtf":
-        raise MoveError("fait pour l'instant sur un GDTF seulement (pas encore sur un XML MA3)")
     model = ft.top_level(model_name)
     if model is None or not geos:
         raise MoveError(f"modèle « {model_name} » introuvable")
@@ -473,10 +551,8 @@ def to_reference(ft: FixtureType, geos: list[Geometry], model_name: str) -> tupl
     all_names = {x.name: (k, i) for k, t in enumerate(trees) for i, x in enumerate(t)}
     for g, off in zip(geos, final):
         el, parent_el = element_of(ft, g), element_of(ft, g.parent)
-        ref = ET.Element("GeometryReference", {k: v for k, v in el.attrib.items()
-                                               if k in ("Name", "Position", "Model")})
-        ref.set("Geometry", model_name)
-        ET.SubElement(ref, "Break", {"DMXOffset": str(off), "DMXBreak": str(dmx_break or 1)})
+        ref = _new_reference(ft, el, model_name)
+        _add_break(ft, ref, off, dmx_break or 1)
         ref.tail = el.tail
         i = list(parent_el).index(el)
         parent_el.remove(el)
@@ -487,17 +563,16 @@ def to_reference(ft: FixtureType, geos: list[Geometry], model_name: str) -> tupl
         if chans_el is None:
             continue
         for ch in list(chans_el):
-            where = all_names.get(ch.get("Geometry", ""))
+            where = all_names.get(_ch_geo(ft, ch))
             if where is None:
                 continue
             k, i = where
             if mode_el.get("Name") not in moved_modes or k:
                 chans_el.remove(ch)
                 continue
-            ch.set("Geometry", mtree[i].name)  # premier de la série : ses canaux passent au modèle
-            off = (ch.get("Offset") or "None").strip()
-            if off not in ("None", ""):
-                ch.set("Offset", ",".join(str(int(o) - final[0] + 1) for o in off.split(",")))
+            # premier de la série : ses canaux passent au modèle
+            ch.set("Geometry", _geo_link(ft, names_path(mtree[i])))
+            _shift_offsets(ft, ch, 1 - final[0])
         for el in mode_el.iter():
             for key in LINK_ATTRS:
                 v = el.get(key)
@@ -1095,8 +1170,6 @@ def split_per_mode(ft: FixtureType) -> tuple[FixtureType, str]:
     pour les autres, chaque géométrie suffixée du nom du mode (« Base Mode 3-Pixel RGB »). Chaque référence ne garde que les Breaks
     que son mode utilise. Les canaux, liens et adresses suivent : rien ne bouge sur la console."""
     import copy
-    if ft.format != "gdtf":
-        raise MoveError("une base par mode : GDTF seulement pour l'instant")
     shared = shared_trees(ft)
     if not shared:
         return ft, "Chaque mode a déjà sa propre base"
@@ -1137,9 +1210,12 @@ def split_per_mode(ft: FixtureType) -> tuple[FixtureType, str]:
             mel.set("Geometry", renames[root_name])
             chan_renames = {}
             for ch in mel.iterfind("DMXChannels/DMXChannel"):
-                geo = ch.get("Geometry", "")
+                path, geo = ch.get("Geometry", ""), _ch_geo(ft, ch)
                 if geo in renames:
-                    ch.set("Geometry", renames[geo])
+                    if ft.format == "ma3":  # chemin pointé : chaque maillon prend son nouveau nom
+                        ch.set("Geometry", ".".join(renames.get(x, x) for x in path.split(".")))
+                    else:
+                        ch.set("Geometry", renames[geo])
                     lc = ch.find("LogicalChannel")
                     attr = lc.get("Attribute", "") if lc is not None else ""
                     chan_renames[f"{geo}_{attr}"] = f"{renames[geo]}_{attr}"

@@ -1008,7 +1008,7 @@ class AtelierWindow(QMainWindow):
         refs = {g.reference for g in root.walk() if g.is_reference} if root else set()
         ndbl = len((names | refs) & self.doubles)
         self.strip_button.setEnabled(bool(self.useless))
-        self.split_button.setEnabled(self.ft.format == "gdtf" and bool(geotree.shared_trees(self.ft)))
+        self.split_button.setEnabled(bool(geotree.shared_trees(self.ft)))
         dot = lambda c: f"<span style='color:{c}; font-size:15px'>●</span>"
         self.summary.setText(
             f"Nettoyage proposé pour ce mode :  {dot(theme.TEXT_DIM.name())} {n3d} géométrie(s) 3D seule(s)"

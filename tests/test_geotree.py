@@ -236,3 +236,83 @@ def test_split_per_mode_itetra_style(tmp_path):
     rel2 = ft2.xml_root.findall(".//DMXMode")[1].find("Relations/Relation")
     assert rel2.get("Master") == "Base RGB_Dimmer" and rel2.get("Follower").startswith("Px_ColorAdd_R")
     assert geotree.split_per_mode(ft2)[1].startswith("Chaque mode")
+
+
+def _ma3_wash(tmp_path):
+    """Lyre wash MA3 façon Quantum Wash : 3 anneaux RGB (adresses à l'envers) + dimmer virtuel,
+    un mode Basic sans canal sur les anneaux, un mode Extended avec."""
+    def ch(geo, attr, coarse=None):
+        c = f' Coarse="{coarse}"' if coarse else ""
+        return (f'<DMXChannel{c} Geometry="{geo}"><LogicalChannel Attribute="{attr}">'
+                f'<ChannelFunction Name="{attr}" Attribute="{attr}"/></LogicalChannel></DMXChannel>')
+    head = "Base.Yoke.Head"
+    rings = "".join(f'<Geometry Name="Ring {i}" GridAuto="Manual" GridX="0" GridY="{i - 1}" GridZ="0"/>'
+                    for i in (1, 2, 3))
+    ext = ch("Base", "Dimmer", 1) + ch("Base.Yoke", "Pan", 2) + ch(head, "Tilt", 3)
+    rel = ""
+    for i, start in ((3, 4), (2, 7), (1, 10)):
+        ext += ch(f"{head}.Ring {i}", "Dimmer") + "".join(
+            ch(f"{head}.Ring {i}", a, start + k) for k, a in enumerate(("ColorRGB_R", "ColorRGB_G", "ColorRGB_B")))
+        rel += f'<Relation Name="R{i}" Master="Ring {i}_Dimmer" Follower="Ring {i}_ColorRGB_R.ColorRGB_R.ColorRGB_R" Type="Multiply"/>'
+    basic = ch(head, "Dimmer", 1) + ch("Base.Yoke", "Pan", 2) + ch(head, "Tilt", 3)
+    xml = ('<GMA3 DataVersion="2.3.2.0"><FixtureType Name="Wash" Manufacturer="T"><Geometries>'
+           '<Geometry Name="Base" Model="Base"><Geometry Name="Yoke" PosZ="-0.1000">'
+           f'<Geometry Name="Head" PosZ="-0.2800">{rings}</Geometry></Geometry></Geometry></Geometries>'
+           f'<DMXModes><DMXMode Name="Basic" Geometry="Base"><DMXChannels>{basic}</DMXChannels></DMXMode>'
+           f'<DMXMode Name="Extended" Geometry="Base"><DMXChannels>{ext}</DMXChannels>'
+           f'<Relations>{rel}</Relations></DMXMode></DMXModes></FixtureType></GMA3>')
+    path = tmp_path / "wash.xml"
+    path.write_text(xml, encoding="utf-8")
+    return gdtf.load(path)
+
+
+def _rings(ft, mode="Extended"):
+    m = ft.mode(mode)
+    return [(i.name, [(s.attribute, s.addresses) for s in i.slots])
+            for i in compare.flatten(compare.instances(ft, m)) if i.name.startswith("Ring")]
+
+
+def test_group_on_ma3_xml(tmp_path):
+    """XML MA3 (fichier venu de la console) : modèle + références, mêmes adresses."""
+    ft = _ma3_wash(tmp_path)
+    before = _rings(ft)
+    rings = [ft.geometry(f"Ring {i}") for i in (1, 2, 3)]
+    new, msg = geotree.group(ft, rings, "Ring")
+    assert "3 références" in msg and new.format == "ma3"
+    assert _rings(new) == before
+    node = new.xml_root.find("FixtureType")
+    assert node.find("Geometries")[0].get("Name") == "Ring"  # modèles en tête, comme la console
+    refs = node.findall(".//GeometryReference")
+    assert [(r.get("Name"), r.get("GridY"), [b.attrib for b in r]) for r in refs] == [
+        ("Ring 1", "0", [{"DMXPatch": "10"}]), ("Ring 2", "1", [{"DMXPatch": "7"}]),
+        ("Ring 3", "2", [{"DMXPatch": "4"}])]
+    chans = [(c.get("Geometry"), c.get("Coarse")) for c in node.iterfind(".//DMXMode[@Name='Extended']//DMXChannel")]
+    assert chans[3:] == [("Ring", None), ("Ring", "1"), ("Ring", "2"), ("Ring", "3")]
+    rels = node.findall(".//DMXMode[@Name='Extended']/Relations/Relation")
+    assert [(r.get("Master"), r.get("Follower")) for r in rels] == [("Ring_Dimmer", "Ring_ColorRGB_R.ColorRGB_R.ColorRGB_R")]
+
+
+def test_new_reference_then_to_reference_on_ma3(tmp_path):
+    """« Nouveau modèle… » sur un seul anneau, puis les deux autres pris comme références."""
+    ft = _ma3_wash(tmp_path)
+    before = _rings(ft)
+    ft, _ = geotree.group(ft, [ft.geometry("Ring 1")], "Ring")
+    ft, msg = geotree.to_reference(ft, [ft.geometry("Ring 2"), ft.geometry("Ring 3")], "Ring")
+    assert "adresses 7, 4" in msg
+    assert _rings(ft) == before
+    assert [b.dmx_offset for i in (1, 2, 3) for b in ft.geometry(f"Ring {i}").breaks] == [10, 7, 4]
+
+
+def test_split_per_mode_on_ma3(tmp_path):
+    """Une base par mode sur un XML MA3 : les chemins pointés des canaux suivent."""
+    ft = _ma3_wash(tmp_path)
+    before = {m.name: _rings(ft, m.name) for m in ft.modes}
+    new, msg = geotree.split_per_mode(ft)
+    assert "1 base" in msg
+    assert [m.geometry for m in new.modes] == ["Base Basic", "Base Extended"]
+    paths = {c.get("Geometry") for c in new.xml_root.iter("DMXChannel")}
+    assert "Base Extended.Yoke Extended.Head Extended.Ring 2 Extended" in paths
+    assert not any(p.startswith("Base.") or p == "Base" for p in paths)
+    rings = [new.geometry(f"Ring {i} Extended") for i in (1, 2, 3)]
+    grouped, _ = geotree.group(new, rings, "Ring")
+    assert [a for _, a in _rings(grouped)] == [a for _, a in before["Extended"]]

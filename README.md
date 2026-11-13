@@ -89,7 +89,8 @@ des adresses déjà prises). Sous l'arbre du mode, ses **modèles** (« modèle 
 leurs références (ex. pixels rangés sous le master une fois pour A et B). On range à
 l'intérieur d'un même arbre. **Double-clic** : popup nom / type / adresse (un champ par jeu
 d'adresses d'une référence, ou premier canal dans le mode) / grille (proposée d'après la 3D).
-Regrouper, fusionner et dupliquer : GDTF seulement pour l'instant.
+Regrouper, changer en référence, dupliquer et « Une base par mode » marchent aussi sur un XML MA3
+(fichier exporté de la console). Fusionner, la charte DMX et l'import de mesh : GDTF seulement pour l'instant.
 
 ## Lancer sous Windows
 

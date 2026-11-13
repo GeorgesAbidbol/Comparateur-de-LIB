@@ -83,6 +83,9 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
 - [ ] Import onPC d'un fixture créé de zéro (Muse Fresnel70CT+ : attributs proposés, plages).
 - [ ] Connexion GDTF Share réelle (non testable depuis l'environnement de dev).
 - [ ] Comment MA3 2.3.2.0 affiche un dimmer virtuel ajouté dans un GDTF.
+- [ ] Atelier sur un XML MA3 (13/11/2026, Quantum Wash de Jo) : regrouper, changer en référence et une base
+  par mode écrivent le format console (PosX…, Break DMXPatch, Coarse/Fine, chemins pointés, modèles en tête).
+  À confirmer à l'import onPC.
 - [x] Axis : une tête seule se fond dans l'instance principale (iTetra2) ; plusieurs têtes
   (12 tilts, copiées ou en références) = autant d'instances (confirmé par Jo, 10/11/2026).
 - [x] iTetra2 : un mode choisit le Break d'une référence par ses canaux (`DMXBreak="1"` →
