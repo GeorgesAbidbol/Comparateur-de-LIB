@@ -20,7 +20,8 @@ from PySide6.QtCore import QMimeData, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QDrag, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                                QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
-                               QScrollArea, QSpinBox, QSplitter, QVBoxLayout, QWidget)
+                               QAbstractItemView, QHeaderView, QScrollArea, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
+                               QVBoxLayout, QWidget)
 
 from .. import charte_dmx, compare, diagnostic, gdtf, geotree
 from ..gdtf import FixtureType, Geometry
@@ -708,7 +709,7 @@ class ChannelDialog(QDialog):
     """Un canal de la charte DMX : attribut, adresses (coarse, fine…), valeur par défaut."""
 
     def __init__(self, title: str, attributes: list[str], attribute: str = "", offsets=None,
-                 default: str = "", parent=None):
+                 default: str = "", parent=None, ma3: bool = False):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(420)
@@ -719,7 +720,8 @@ class ChannelDialog(QDialog):
         self.offsets = QLineEdit(",".join(map(str, offsets or [])))
         self.offsets.setPlaceholderText("ex. 5   ou   5,6 pour 16 bits   (vide = virtuel)")
         self.default = QLineEdit(default)
-        self.default.setPlaceholderText("ex. 0/1   ou   32768/2")
+        self.default.setPlaceholderText("ex. 80007F (24 bits hexa)   ou   32768/2" if ma3
+                                        else "ex. 0/1   ou   32768/2")
         form = QFormLayout(self)
         form.setContentsMargins(18, 16, 18, 14)
         form.setVerticalSpacing(10)
@@ -783,9 +785,12 @@ class DuplicateDialog(QDialog):
 class EditDialog(QDialog):
     """Popup du double-clic : nom, type, adresse, grille d'une géométrie."""
 
-    def __init__(self, ft: FixtureType, g: Geometry, mode: str, parent=None):
+    def __init__(self, ft: FixtureType, g: Geometry, mode: str, parent=None, rows=None, on_channel=None):
+        """`rows()` : canaux contenus dans la géométrie (relus après chaque correction) ;
+        `on_channel(géométrie, attribut)` : corrige un canal (attribut vide = nouveau canal)."""
         super().__init__(parent)
         self.g, self.mode = g, mode
+        self._rows, self._on_channel = rows, on_channel
         self.setWindowTitle(f"Paramètres de « {g.name} »")
         self.setMinimumWidth(520)
         form = QFormLayout(self)
@@ -862,14 +867,69 @@ class EditDialog(QDialog):
         grid.addWidget(propose)
         form.addRow("Grille", grid)
 
+        # Jo, 13/11/2026 : « double-clic sur Head : accès à tous les canaux de la géométrie »
+        self.channels: Optional[QTableWidget] = None
+        if rows is not None:
+            title = QLabel(f"Canaux dans « {mode} »" + (f" (modèle « {g.reference} »)" if g.is_reference else "")
+                           + " — double-clic pour repatcher")
+            title.setFont(theme.font(10, True))
+            form.addRow(title)
+            self.channels = QTableWidget(0, 5)
+            self.channels.setHorizontalHeaderLabels(["Canal", "Attribut", "Géométrie", "Bits", "Défaut"])
+            self.channels.verticalHeader().setVisible(False)
+            self.channels.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.channels.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.channels.setSelectionMode(QAbstractItemView.SingleSelection)
+            self.channels.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            self.channels.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+            self.channels.setMinimumHeight(240)
+            self.channels.itemDoubleClicked.connect(self._channel_clicked)
+            form.addRow(self.channels)
+            row = QHBoxLayout()
+            add = QPushButton(f"+ Canal sur « {charte_dmx.carrier(g)} »")
+            add.clicked.connect(lambda: self._channel_asked(charte_dmx.carrier(g), ""))
+            mod = QPushButton("Modifier…")
+            mod.clicked.connect(lambda: self._channel_clicked(self.channels.item(self.channels.currentRow(), 0)))
+            row.addWidget(add)
+            row.addStretch(1)
+            row.addWidget(mod)
+            form.addRow(row)
+            self._fill_channels()
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Appliquer")
-        buttons.button(QDialogButtonBox.Cancel).setText("Annuler")
+        buttons.button(QDialogButtonBox.Cancel).setText("Fermer" if rows is not None else "Annuler")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
         self.setStyleSheet(f"QLineEdit, QSpinBox {{ background: {theme.ROW.name()}; border: none;"
                            f" border-radius: 6px; padding: 6px 10px; }}")
+
+    def _fill_channels(self) -> None:
+        rows = self._rows()
+        self.channels.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            cells = ["/".join(map(str, r.offsets)) if r.offsets else "virtuel", r.attribute, r.geometry,
+                     str(r.bits), r.default]
+            for j, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                item.setData(Qt.UserRole, (r.geometry, r.attribute))
+                if j == 2 and r.geometry == charte_dmx.carrier(self.g):
+                    item.setForeground(theme.ACCENT)  # les canaux de la géométrie elle-même
+                self.channels.setItem(i, j, item)
+
+    def channel_texts(self) -> list[str]:
+        """Lignes du tableau en texte (tests)."""
+        return ["  ".join(self.channels.item(i, j).text() for j in range(5))
+                for i in range(self.channels.rowCount())]
+
+    def _channel_clicked(self, item) -> None:
+        if item is not None:
+            self._channel_asked(*item.data(Qt.UserRole))
+
+    def _channel_asked(self, geo: str, attribute: str) -> None:
+        if self._on_channel is not None and self._on_channel(geo, attribute):
+            self._fill_channels()
 
     def edit(self) -> "geotree.Edit":
         e = geotree.Edit()
@@ -1505,10 +1565,13 @@ class AtelierWindow(QMainWindow):
 
     def _edit(self, g: Geometry) -> None:
         mode = self.modes.currentText()
-        dlg = EditDialog(self.ft, g, mode, self)
+        name = g.name
+        rows = lambda: charte_dmx.lignes_arbre(self.ft, mode, self.ft.geometry(name) or g)
+        dlg = EditDialog(self.ft, g, mode, self, rows, self._edit_channel)
         if dlg.exec() == QDialog.Accepted:
             edit = dlg.edit()
-            if self._apply(geotree.apply_edit, g, edit):
+            g = self.ft.geometry(name) or g  # le fixture a pu être relu (canaux corrigés)
+            if any(v is not None for v in vars(edit).values()) and self._apply(geotree.apply_edit, g, edit):
                 self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
 
     def _merge(self, names: list) -> None:
@@ -1545,7 +1608,13 @@ class AtelierWindow(QMainWindow):
         g = self.params.geo
         if self.ft is None or g is None:
             return
-        mode, geo = self.modes.currentText(), charte_dmx.carrier(g)
+        self._edit_channel(charte_dmx.carrier(g), attribute, what)
+
+    def _edit_channel(self, geo: str, attribute: str, what: str = "") -> bool:
+        """Ajoute (attribut vide), modifie ou retire un canal de `geo` dans le mode affiché."""
+        mode = self.modes.currentText()
+        what = what or ("edit" if attribute else "add")
+        ok = False
         if what == "remove":
             ok = self._apply(charte_dmx.retirer, mode, geo, attribute)
         else:
@@ -1555,24 +1624,29 @@ class AtelierWindow(QMainWindow):
                     free = [charte_dmx.libre(self.ft, mode, geo)]
                 except geotree.MoveError as exc:
                     self._refuse(str(exc))
-                    return
+                    return False
                 dlg = ChannelDialog(f"Nouveau canal sur « {geo} »", known, "", free, "", self)
             else:
-                row = next(r for r in charte_dmx.lignes(self.ft, mode, g) if r.attribute == attribute)
+                row = next((r for r in charte_dmx.lignes(self.ft, mode, self.ft.geometry(geo))
+                            if r.attribute == attribute), None)
+                if row is None:
+                    self._refuse(f"canal « {geo}_{attribute} » introuvable dans « {mode} »")
+                    return False
                 dlg = ChannelDialog(f"Canal « {geo}_{attribute} »", known, attribute, row.offsets,
-                                    row.default, self)
+                                    row.default, self, self.ft.format == "ma3")
             if dlg.exec() != QDialog.Accepted:
-                return
+                return False
             new, offsets, default = dlg.values()
             if offsets is None:
                 self._refuse("adresses illisibles (attendu 5 ou 5,6)")
-                return
+                return False
             if what == "add":
                 ok = self._apply(charte_dmx.ajouter, mode, geo, new, offsets)
             else:
                 ok = self._apply(charte_dmx.modifier, mode, geo, attribute, offsets, new, default or None)
         if ok:
             self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
+        return ok
 
     def _apply_params(self) -> None:
         """Bouton « Appliquer » du panneau : référence (modèle choisi ou créé), puis nom, type,

@@ -255,7 +255,12 @@ def _ma3_wash(tmp_path):
             ch(f"{head}.Ring {i}", a, start + k) for k, a in enumerate(("ColorRGB_R", "ColorRGB_G", "ColorRGB_B")))
         rel += f'<Relation Name="R{i}" Master="Ring {i}_Dimmer" Follower="Ring {i}_ColorRGB_R.ColorRGB_R.ColorRGB_R" Type="Multiply"/>'
     basic = ch(head, "Dimmer", 1) + ch("Base.Yoke", "Pan", 2) + ch(head, "Tilt", 3)
-    xml = ('<GMA3 DataVersion="2.3.2.0"><FixtureType Name="Wash" Manufacturer="T"><Geometries>'
+    defs = "".join(f'<Attribute Name="{a}" Pretty="{a}" Feature="{f}"/>' for a, f in (
+        ("Dimmer", "Dimmer.Dimmer"), ("Pan", "Position.PanTilt"), ("Tilt", "Position.PanTilt"),
+        ("ColorRGB_R", "Color.RGB"), ("ColorRGB_G", "Color.RGB"), ("ColorRGB_B", "Color.RGB")))
+    xml = ('<GMA3 DataVersion="2.3.2.0"><FixtureType Name="Wash" Manufacturer="T">'
+           f'<AttributeDefinitions><FeatureGroups/><Attributes>{defs}</Attributes></AttributeDefinitions>'
+           '<Geometries>'
            '<Geometry Name="Base" Model="Base"><Geometry Name="Yoke" PosZ="-0.1000">'
            f'<Geometry Name="Head" PosZ="-0.2800">{rings}</Geometry></Geometry></Geometry></Geometries>'
            f'<DMXModes><DMXMode Name="Basic" Geometry="Base"><DMXChannels>{basic}</DMXChannels></DMXMode>'
@@ -341,14 +346,39 @@ def test_grid_z(tmp_path):
 
 
 def test_charte_lue_sur_ma3(tmp_path):
-    """Le panneau liste les canaux d'un XML de console (lecture ; la correction reste GDTF)."""
+    """Le panneau liste les canaux d'un XML de console."""
     from ma3lib import charte_dmx
     ft = _ma3_wash(tmp_path)
     rows = charte_dmx.lignes(ft, "Extended", ft.geometry("Ring 2"))
     assert [(r.attribute, r.offsets) for r in rows] == [
         ("ColorRGB_R", [7]), ("ColorRGB_G", [8]), ("ColorRGB_B", [9]), ("Dimmer", [])]
-    with pytest.raises(geotree.MoveError):
-        charte_dmx.libre(ft, "Extended", "Ring 2")
+    assert charte_dmx.libre(ft, "Extended", "Ring 2") == 13
+
+
+def test_charte_corrigee_sur_ma3(tmp_path):
+    """Jo (13/11/2026) : repatcher canal par canal sur les fichiers de la console aussi."""
+    from ma3lib import charte_dmx
+    ft = _ma3_wash(tmp_path)
+    ft, msg = charte_dmx.modifier(ft, "Extended", "Head", "Tilt", offsets=[3, 13], default="128/1")
+    ch = next(c for c in ft.xml_root.iterfind(".//DMXMode[@Name='Extended']//DMXChannel")
+              if c.get("Geometry") == "Base.Yoke.Head")
+    assert (ch.get("Coarse"), ch.get("Fine"), ch.get("Offset")) == ("3", "13", None)
+    assert ch.find("LogicalChannel/ChannelFunction").get("Default") == "808080"
+    with pytest.raises(geotree.MoveError, match="déjà prise"):
+        charte_dmx.modifier(ft, "Extended", "Head", "Tilt", offsets=[4])
+    ft, _ = charte_dmx.ajouter(ft, "Extended", "Head", "Zoom", [14])
+    z = [c for c in ft.xml_root.iterfind(".//DMXMode[@Name='Extended']//DMXChannel")
+         if c.find("LogicalChannel").get("Attribute") == "Zoom"][0]
+    assert z.get("Geometry") == "Base.Yoke.Head" and z.get("Coarse") == "14" and z.get("DefaultChannelFunction") == "Zoom.Zoom 1"
+    assert [(r.attribute, r.offsets) for r in charte_dmx.lignes(ft, "Extended", ft.geometry("Head"))] == [
+        ("Tilt", [3, 13]), ("Zoom", [14])]
+    ft, _ = charte_dmx.modifier(ft, "Extended", "Ring 1", "ColorRGB_R", new_attribute="ColorRGB_W")
+    rel = ft.xml_root.find(".//DMXMode[@Name='Extended']/Relations/Relation[@Name='R1']")
+    assert rel.get("Follower") == "Ring 1_ColorRGB_W.ColorRGB_W.ColorRGB_W"
+    ft, msg = charte_dmx.retirer(ft, "Extended", "Head", "Zoom")
+    assert "retiré" in msg and charte_dmx.libre(ft, "Extended", "Head") == 14
+    with pytest.raises(geotree.MoveError, match="hexa"):
+        charte_dmx.modifier(ft, "Extended", "Head", "Tilt", default="zz")
 
 
 def test_nouvelle_geometrie_posee_dans_l_arbre(tmp_path):

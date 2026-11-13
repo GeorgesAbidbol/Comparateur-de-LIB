@@ -633,3 +633,31 @@ def test_zone_geometries_disponibles(tmp_path, good_bar, monkeypatch):
     el = atelier.geotree.element_of(win.ft, win.ft.geometry("Ring 2"))
     assert (el.get("GridAuto"), el.get("GridX"), el.get("GridY")) == ("Manual", "3", "1")
     win.close()
+
+
+def test_double_clic_montre_tous_les_canaux(tmp_path, monkeypatch):
+    """Jo (13/11/2026) : double-clic sur Head = tous les canaux contenus, repatchables (XML MA3)."""
+    from PySide6.QtWidgets import QApplication, QDialog
+    from ma3lib.gui import atelier
+    from test_geotree import _ma3_wash
+
+    app = QApplication.instance() or QApplication([])
+    ft = _ma3_wash(tmp_path)
+    win = atelier.AtelierWindow()
+    win.load(str(ft.source), "Extended")
+    head = win.ft.geometry("Head")
+    dlg = atelier.EditDialog(win.ft, head, "Extended", win,
+                             lambda: atelier.charte_dmx.lignes_arbre(win.ft, "Extended", win.ft.geometry("Head")),
+                             win._edit_channel)
+    texts = dlg.channel_texts()
+    assert len(texts) == 1 + 3 * 4 and texts[0].startswith("3") and "Tilt" in texts[0]
+    assert any("Ring 2" in t for t in texts)
+    # repatcher le rouge de Ring 2 (7 -> 20) depuis la fenêtre
+    monkeypatch.setattr(atelier.ChannelDialog, "exec", lambda self: QDialog.Accepted)
+    monkeypatch.setattr(atelier.ChannelDialog, "values", lambda self: ("ColorRGB_R", [20], ""))
+    dlg._channel_asked("Ring 2", "ColorRGB_R")
+    rows = atelier.charte_dmx.lignes(win.ft, "Extended", win.ft.geometry("Ring 2"))
+    assert rows[0].offsets == [8] and any(r.attribute == "ColorRGB_R" and r.offsets == [20] for r in rows)
+    assert any(t.startswith("20 ") for t in dlg.channel_texts())
+    dlg.close()
+    win.close()

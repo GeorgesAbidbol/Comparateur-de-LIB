@@ -2,7 +2,9 @@
 dans un mode, qu'on peut déplacer, passer en 16 bits, changer d'attribut, ajouter ou retirer.
 
 Tout se fait sur l'arbre XML d'origine (rien de ce qu'on ne comprend pas n'est perdu), après
-vérification ; le fixture est relu à la fin. GDTF seulement pour l'instant.
+vérification ; le fixture est relu à la fin. GDTF et XML MA3 (Jo, 13/11/2026 : « sur les fichiers
+de la console aussi ») : MA3 écrit les octets en Coarse/Fine/Ultra/Uber, la géométrie en chemin
+pointé (« Base.Yoke.Head »), les valeurs sur 24 bits en hexadécimal (« 80007F »).
 """
 
 from __future__ import annotations
@@ -34,9 +36,12 @@ def carrier(g: Geometry) -> str:
     return g.reference if g.is_reference else g.name
 
 
+_BYTES = ("Coarse", "Fine", "Ultra", "Uber")  # octets d'un canal MA3
+
+
 def _mode_el(ft: FixtureType, mode_name: str, read: bool = False) -> ET.Element:
-    if ft.xml_root is None or (ft.format != "gdtf" and not read):
-        raise MoveError("la charte DMX se corrige pour l'instant sur un GDTF seulement (pas un XML MA3)")
+    if ft.xml_root is None:
+        raise MoveError("fixture sans arbre XML")
     for m in ft.xml_root.iterfind("FixtureType/DMXModes/DMXMode"):
         if m.get("Name") == mode_name:
             return m
@@ -49,13 +54,30 @@ def _attr(ch: ET.Element) -> str:
 
 
 def _offsets(ch: ET.Element) -> list[int]:
+    if ch.get("Offset") is None:  # MA3 : Coarse, Fine… (aucun = canal virtuel)
+        return [int(ch.get(k)) for k in _BYTES if ch.get(k)]
     off = (ch.get("Offset") or "None").strip()
     return [] if off in ("None", "") else [int(o) for o in off.split(",")]
 
 
+def _set_offsets(ft: FixtureType, ch: ET.Element, offsets: list[int]) -> None:
+    if ft.format == "ma3":
+        for k in _BYTES:
+            ch.attrib.pop(k, None)
+        for k, o in zip(_BYTES, offsets):
+            ch.set(k, str(o))
+    else:
+        ch.set("Offset", ",".join(map(str, offsets)) if offsets else "None")
+
+
+def _geo(ch: ET.Element) -> str:
+    """Nom de la géométrie d'un canal (MA3 : dernier maillon du chemin pointé)."""
+    return ch.get("Geometry", "").split(".")[-1]
+
+
 def _find(mode_el: ET.Element, geo: str, attribute: str) -> ET.Element:
     for ch in mode_el.iterfind("DMXChannels/DMXChannel"):
-        if ch.get("Geometry") == geo and _attr(ch) == attribute:
+        if _geo(ch) == geo and _attr(ch) == attribute:
             return ch
     raise MoveError(f"canal « {geo}_{attribute} » introuvable")
 
@@ -67,14 +89,22 @@ def lignes(ft: FixtureType, mode_name: str, g: Geometry) -> list[Ligne]:
     except MoveError:
         return []
     geo = carrier(g)
-    ma3 = ft.format == "ma3"  # XML de la console : chemin pointé, Coarse/Fine… (lecture seule)
     out = []
     for ch in mode_el.iterfind("DMXChannels/DMXChannel"):
-        if (ch.get("Geometry", "").split(".")[-1] if ma3 else ch.get("Geometry")) == geo:
+        if _geo(ch) == geo:
             cf = ch.find("LogicalChannel/ChannelFunction")
             default = ch.get("Default") or (cf.get("Default", "") if cf is not None else "")
-            offs = [int(ch.get(k)) for k in ("Coarse", "Fine", "Ultra", "Uber") if ch.get(k)] if ma3 else _offsets(ch)
-            out.append(Ligne(_attr(ch), offs, default, geo))
+            out.append(Ligne(_attr(ch), _offsets(ch), default, geo))
+    return sorted(out, key=lambda l: (not l.offsets, l.offsets[:1]))
+
+
+def lignes_arbre(ft: FixtureType, mode_name: str, g: Geometry) -> list[Ligne]:
+    """Tous les canaux contenus dans la géométrie : les siens et ceux de ses enfants (pour une
+    référence, ceux de son modèle), dans l'ordre des adresses, virtuels à la fin."""
+    top = ft.top_level(g.reference) if g.is_reference else g
+    out: list[Ligne] = []
+    for x in (top.walk() if top is not None else []):
+        out += lignes(ft, mode_name, x) if not x.is_reference else []
     return sorted(out, key=lambda l: (not l.offsets, l.offsets[:1]))
 
 
@@ -93,11 +123,11 @@ def _check_free(ft: FixtureType, mode_el: ET.Element, geo: str, offsets: list[in
         raise MoveError("adresses hors de 1…512 ou répétées")
     names = _space(ft, geo)
     for ch in mode_el.iterfind("DMXChannels/DMXChannel"):
-        if ch is skip or ch.get("Geometry") not in names or ch.get("DMXBreak", "1") != dmx_break:
+        if ch is skip or _geo(ch) not in names or ch.get("DMXBreak", "1") != dmx_break:
             continue
         clash = set(offsets) & set(_offsets(ch))
         if clash:
-            raise MoveError(f"l'adresse {min(clash)} est déjà prise par « {ch.get('Geometry')}_{_attr(ch)} »")
+            raise MoveError(f"l'adresse {min(clash)} est déjà prise par « {_geo(ch)}_{_attr(ch)} »")
 
 
 def _ensure_attribute(ft: FixtureType, name: str) -> None:
@@ -129,16 +159,16 @@ def modifier(ft: FixtureType, mode_name: str, geo: str, attribute: str,
     if new and new != attribute:
         if "." in new or " " in new:
             raise MoveError(f"nom d'attribut « {new} » : ni point ni espace")
-        if any(c is not ch and c.get("Geometry") == geo and _attr(c) == new
+        if any(c is not ch and _geo(c) == geo and _attr(c) == new
                for c in mode_el.iterfind("DMXChannels/DMXChannel")):
             raise MoveError(f"« {geo} » porte déjà l'attribut « {new} » dans ce mode")
     if offsets is not None and offsets != _offsets(ch):
         _check_free(ft, mode_el, geo, offsets, ch, ch.get("DMXBreak", "1"))
-    if default is not None and not _valid_dmx(default):
-        raise MoveError(f"valeur par défaut « {default} » : attendu valeur/octets, ex. 128/1")
+    if default is not None:
+        default = _default_for(ft, default, not (offsets if offsets is not None else _offsets(ch)))
 
     if offsets is not None and offsets != _offsets(ch):
-        ch.set("Offset", ",".join(map(str, offsets)) if offsets else "None")
+        _set_offsets(ft, ch, offsets)
         done.append("adresse " + ("/".join(map(str, offsets)) if offsets else "virtuelle"))
     if default is not None:
         cf = ch.find("LogicalChannel/ChannelFunction")
@@ -154,6 +184,10 @@ def modifier(ft: FixtureType, mode_name: str, geo: str, attribute: str,
                 cf.set("Attribute", new)
             if cf.get("Name", "").startswith(attribute):
                 cf.set("Name", new + cf.get("Name")[len(attribute):])
+        dcf = ch.get("DefaultChannelFunction", "")  # MA3 : « Attribut.Fonction »
+        if dcf.split(".")[0] == attribute:
+            func = dcf.split(".", 1)[1] if "." in dcf else attribute
+            ch.set("DefaultChannelFunction", f"{new}.{new + func[len(attribute):] if func.startswith(attribute) else func}")
         old_name, new_name = f"{geo}_{attribute}", f"{geo}_{new}"
         for el in mode_el.iter():  # liens vers ce canal : relations, InitialFunction, ModeMaster…
             for key in remap.LINK_ATTRS:
@@ -177,6 +211,23 @@ def _valid_dmx(value: str) -> bool:
     return len(parts) == 2 and all(p.isdigit() for p in parts) and 1 <= int(parts[1]) <= 4
 
 
+def _default_for(ft: FixtureType, value: str, virtual: bool) -> str:
+    """Valeur par défaut au format du fichier. GDTF : « 128/1 ». MA3 : 24 bits en hexadécimal
+    (« 80007F ») ; on accepte aussi « 128/1 », converti comme le fait l'export."""
+    import re
+    value = value.strip()
+    if ft.format == "ma3":
+        if re.fullmatch(r"[0-9A-Fa-f]{6}", value):
+            return value.upper()
+        if _valid_dmx(value):
+            from .ma3xml import dmx_value
+            return dmx_value(value, virtual)
+        raise MoveError(f"valeur par défaut « {value} » : attendu 6 chiffres hexa (ex. 80007F) ou 128/1")
+    if not _valid_dmx(value):
+        raise MoveError(f"valeur par défaut « {value} » : attendu valeur/octets, ex. 128/1")
+    return value
+
+
 def ajouter(ft: FixtureType, mode_name: str, geo: str, attribute: str,
             offsets: list[int]) -> tuple[FixtureType, str]:
     """Ajoute un canal à la géométrie, avec une fonction sur toute la plage."""
@@ -189,10 +240,20 @@ def ajouter(ft: FixtureType, mode_name: str, geo: str, attribute: str,
     chans = mode_el.find("DMXChannels")
     if chans is None:
         chans = ET.SubElement(mode_el, "DMXChannels")
-    if any(c.get("Geometry") == geo and _attr(c) == attribute for c in chans):
+    if any(_geo(c) == geo and _attr(c) == attribute for c in chans):
         raise MoveError(f"« {geo} » porte déjà l'attribut « {attribute} » dans ce mode")
     _check_free(ft, mode_el, geo, offsets)
     _ensure_attribute(ft, attribute)
+    if ft.format == "ma3":  # forme d'un canal écrit par la console
+        attrs = {k: str(o) for k, o in zip(_BYTES, offsets)}
+        attrs["DefaultChannelFunction"] = f"{attribute}.{attribute} 1"
+        attrs["Geometry"] = ".".join(geotree.names_path(ft.geometry(geo)))
+        ch = ET.SubElement(chans, "DMXChannel", attrs)
+        lc = ET.SubElement(ch, "LogicalChannel", {"Attribute": attribute})
+        ET.SubElement(lc, "ChannelFunction", {"Name": f"{attribute} 1", "Attribute": attribute,
+                                              "Default": "000000"})
+        where = "/".join(map(str, offsets)) if offsets else "virtuel"
+        return _done(ft, f"canal « {geo}_{attribute} » ajouté ({where})")
     n = max(1, len(offsets))
     ch = ET.SubElement(chans, "DMXChannel", {
         "DMXBreak": "1", "Offset": ",".join(map(str, offsets)) if offsets else "None",
@@ -230,7 +291,7 @@ def libre(ft: FixtureType, mode_name: str, geo: str) -> int:
     """Première adresse libre après les canaux de l'arbre de `geo` (pour « + Canal »)."""
     mode_el = _mode_el(ft, mode_name)
     names = _space(ft, geo)
-    used = [o for ch in mode_el.iterfind("DMXChannels/DMXChannel") if ch.get("Geometry") in names
+    used = [o for ch in mode_el.iterfind("DMXChannels/DMXChannel") if _geo(ch) in names
             for o in _offsets(ch)]
     return min(512, max(used, default=0) + 1)
 
