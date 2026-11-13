@@ -338,3 +338,14 @@ def test_grid_z(tmp_path):
     el = geotree.element_of(new, new.geometry("Ring 2"))
     assert (el.get("GridAuto"), el.get("GridX"), el.get("GridY"), el.get("GridZ")) == ("Manual", "1", "2", "3")
     assert "grille 1,2,3" in msg
+
+
+def test_charte_lue_sur_ma3(tmp_path):
+    """Le panneau liste les canaux d'un XML de console (lecture ; la correction reste GDTF)."""
+    from ma3lib import charte_dmx
+    ft = _ma3_wash(tmp_path)
+    rows = charte_dmx.lignes(ft, "Extended", ft.geometry("Ring 2"))
+    assert [(r.attribute, r.offsets) for r in rows] == [
+        ("ColorRGB_R", [7]), ("ColorRGB_G", [8]), ("ColorRGB_B", [9]), ("Dimmer", [])]
+    with pytest.raises(geotree.MoveError):
+        charte_dmx.libre(ft, "Extended", "Ring 2")

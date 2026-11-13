@@ -34,8 +34,8 @@ def carrier(g: Geometry) -> str:
     return g.reference if g.is_reference else g.name
 
 
-def _mode_el(ft: FixtureType, mode_name: str) -> ET.Element:
-    if ft.format != "gdtf" or ft.xml_root is None:
+def _mode_el(ft: FixtureType, mode_name: str, read: bool = False) -> ET.Element:
+    if ft.xml_root is None or (ft.format != "gdtf" and not read):
         raise MoveError("la charte DMX se corrige pour l'instant sur un GDTF seulement (pas un XML MA3)")
     for m in ft.xml_root.iterfind("FixtureType/DMXModes/DMXMode"):
         if m.get("Name") == mode_name:
@@ -63,16 +63,18 @@ def _find(mode_el: ET.Element, geo: str, attribute: str) -> ET.Element:
 def lignes(ft: FixtureType, mode_name: str, g: Geometry) -> list[Ligne]:
     """Canaux de la géométrie (ou de son modèle) dans ce mode, dans l'ordre des adresses."""
     try:
-        mode_el = _mode_el(ft, mode_name)
+        mode_el = _mode_el(ft, mode_name, read=True)
     except MoveError:
         return []
     geo = carrier(g)
+    ma3 = ft.format == "ma3"  # XML de la console : chemin pointé, Coarse/Fine… (lecture seule)
     out = []
     for ch in mode_el.iterfind("DMXChannels/DMXChannel"):
-        if ch.get("Geometry") == geo:
+        if (ch.get("Geometry", "").split(".")[-1] if ma3 else ch.get("Geometry")) == geo:
             cf = ch.find("LogicalChannel/ChannelFunction")
             default = ch.get("Default") or (cf.get("Default", "") if cf is not None else "")
-            out.append(Ligne(_attr(ch), _offsets(ch), default, geo))
+            offs = [int(ch.get(k)) for k in ("Coarse", "Fine", "Ultra", "Uber") if ch.get(k)] if ma3 else _offsets(ch)
+            out.append(Ligne(_attr(ch), offs, default, geo))
     return sorted(out, key=lambda l: (not l.offsets, l.offsets[:1]))
 
 

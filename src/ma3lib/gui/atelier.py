@@ -579,8 +579,13 @@ class Params(QWidget):
         self.model.setEnabled(g.is_reference)
         b = g.breaks[0] if g.breaks else None
         self.address.setEnabled(b is not None)
+        self.address.setVisible(b is not None)  # sans adresse propre : seulement l'explication
         self.address.setValue(b.dmx_offset if b else 1)
-        self.brk.setText(f"Break {b.dmx_break}" if b else ("sans adresse" if g.is_reference else "portée par les canaux"))
+        self.brk.setText(f"Break {b.dmx_break}" if b else ("sans adresse" if g.is_reference else
+                                                           "pas d'adresse propre : voir ses canaux"))
+        self.brk.setToolTip("" if b else "Seule une référence a sa propre adresse (son Break). Une géométrie "
+                            "n'en a pas : ce sont ses canaux qui ont des numéros dans le mode. Pour les décaler, "
+                            "double-clic sur la ligne : « premier canal ».")
         self.place = (*grid_place(g, ft), grid_z(g, ft))
         self.gx.setValue(self.place[0])
         self.gy.setValue(self.place[1])
