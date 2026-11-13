@@ -798,7 +798,8 @@ class Edit:
     kind: Optional[str] = None
     breaks: Optional[list[int]] = None  # référence : DMXOffset de chaque Break
     start: Optional[tuple[str, int]] = None  # géométrie : (mode, premier canal voulu)
-    grid: Optional[tuple[int, int]] = None
+    grid: Optional[tuple[int, ...]] = None  # (X, Y) ou (X, Y, Z)
+    grid_auto: Optional[bool] = None  # GridAuto : True = la console place, False = à la main
     mesh: Optional[str] = None  # nom d'un Model du fixture, « Cube »/« Cylinder » (créé au besoin), "" = aucun
 
 
@@ -989,9 +990,14 @@ def apply_edit(ft: FixtureType, g: Geometry, e: Edit) -> tuple[FixtureType, str]
         el.set("GridAuto", "Manual")
         el.set("GridX", str(e.grid[0]))
         el.set("GridY", str(e.grid[1]))
-        if el.get("GridZ") is None:
+        if len(e.grid) > 2:
+            el.set("GridZ", str(e.grid[2]))
+        elif el.get("GridZ") is None:
             el.set("GridZ", "0")
-        done.append(f"grille {e.grid[0]},{e.grid[1]}")
+        done.append("grille " + ",".join(map(str, e.grid)))
+    if e.grid_auto is not None:
+        el.set("GridAuto", "Auto" if e.grid_auto else "Manual")
+        done.append("grille auto" if e.grid_auto else "grille à la main")
     if e.name is not None and e.name != g.name:
         old, new = g.name, e.name
         el.set("Name", new)

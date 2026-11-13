@@ -552,3 +552,36 @@ def test_atelier_retirer_3d_propose_une_base_par_mode(tmp_path, _no_message_boxe
     win.undo()
     assert win.ft.mode("Basic").geometry == "Base"
     win.close()
+
+
+def test_params_grille_z(tmp_path):
+    from PySide6.QtWidgets import QApplication
+    from ma3lib.gui.atelier import AtelierWindow
+    from test_geotree import _ma3_wash
+
+    app = QApplication.instance() or QApplication([])
+    ft = _ma3_wash(tmp_path)
+    win = AtelierWindow()
+    win.load(str(ft.source), "Extended")
+    win._select(win.ft.geometry("Ring 3"))
+    win.params.geo = win.ft.geometry("Ring 3")
+    p = win.params
+    assert p.gy.value() == 2 and p.gz.value() == 0
+    assert not p.auto.isChecked() and p.gz.isEnabled()  # anneaux en GridAuto="Manual"
+    p.gz.setValue(4)
+    e = p.edit()
+    assert e.grid == (0, 2, 4) and e.grid_auto is None
+    new, _ = atelier_geotree().apply_edit(win.ft, win.ft.geometry("Ring 3"), e)
+    assert atelier_geotree().element_of(new, new.geometry("Ring 3")).get("GridZ") == "4"
+    p.auto.setChecked(True)  # Auto : X/Y/Z grisés, la console place
+    assert not p.gz.isEnabled()
+    e = p.edit()
+    assert e.grid is None and e.grid_auto is True
+    new2, _ = atelier_geotree().apply_edit(new, new.geometry("Ring 3"), e)
+    assert atelier_geotree().element_of(new2, new2.geometry("Ring 3")).get("GridAuto") == "Auto"
+    win.close()
+
+
+def atelier_geotree():
+    from ma3lib import geotree
+    return geotree

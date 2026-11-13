@@ -329,3 +329,12 @@ def test_ma3_empty_break_gets_dmxpatch(tmp_path):
     assert geotree.element_of(new, new.geometry("Ring 1")).find("Break").attrib == {"DMXPatch": "40"}
     dup, _ = geotree.duplicate(new, new.geometry("Ring 1"), 1, [4])
     assert not any(b.get("DMXOffset") for b in dup.xml_root.iter("Break"))
+
+
+def test_grid_z(tmp_path):
+    """Jo (13/11/2026) : la grille a aussi un Z."""
+    ft = _ma3_wash(tmp_path)
+    new, msg = geotree.apply_edit(ft, ft.geometry("Ring 2"), geotree.Edit(grid=(1, 2, 3)))
+    el = geotree.element_of(new, new.geometry("Ring 2"))
+    assert (el.get("GridAuto"), el.get("GridX"), el.get("GridY"), el.get("GridZ")) == ("Manual", "1", "2", "3")
+    assert "grille 1,2,3" in msg

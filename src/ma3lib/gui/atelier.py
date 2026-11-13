@@ -18,7 +18,7 @@ from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
-from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                                QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
                                QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
@@ -347,6 +347,30 @@ def grid_place(g: Geometry, ft=None) -> tuple[int, int]:
     return geotree.grid_proposal(g, ft)
 
 
+def grid_auto(g: Geometry, ft=None) -> bool:
+    """GridAuto : « Auto » (ou absent) = la console place la géométrie dans la grille."""
+    el = geotree.element_of(ft, g) if ft is not None else None
+    return el is None or el.get("GridAuto", "Auto") != "Manual"
+
+
+def _auto_box(spins) -> "QCheckBox":
+    """Case « Auto » de la grille : cochée, X/Y/Z sont grisés (la console place)."""
+    box = QCheckBox("Auto")
+    box.setToolTip("Cochée : la console place la géométrie dans la grille (GridAuto=Auto).\n"
+                   "Décochée : X, Y, Z à la main (GridAuto=Manual).")
+    box.toggled.connect(lambda on: [s.setEnabled(not on) for s in spins])
+    return box
+
+
+def grid_z(g: Geometry, ft=None) -> int:
+    """GridZ écrit dans le fichier (0 sinon) : la grille MA3 a trois axes."""
+    el = geotree.element_of(ft, g) if ft is not None else None
+    try:
+        return int(el.get("GridZ") or 0) if el is not None else 0
+    except ValueError:
+        return 0
+
+
 class MiniGrid(QWidget):
     """Grille façon Fixture Hero : les géométries sœurs à leur vraie place, la choisie en jaune.
     16 pixels en ligne = une seule ligne de 16 (Jo, 11/11/2026), jamais de retour à la ligne."""
@@ -402,7 +426,8 @@ class Params(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.geo: Optional[Geometry] = None
-        self.place = (0, 0)
+        self.place = (0, 0, 0)
+        self._auto0 = True
         self.title = QLabel()
         self.title.setFont(theme.font(12, True))
         self.name = QLineEdit()
@@ -420,9 +445,10 @@ class Params(QWidget):
         self.address.setRange(1, 512)
         self.brk = QLabel()
         self.brk.setObjectName("dim")
-        self.gx, self.gy = QSpinBox(), QSpinBox()
-        for s in (self.gx, self.gy):
+        self.gx, self.gy, self.gz = QSpinBox(), QSpinBox(), QSpinBox()
+        for s in (self.gx, self.gy, self.gz):
             s.setRange(0, 999)
+        self.auto = _auto_box((self.gx, self.gy, self.gz))
         self.grid = MiniGrid()
         self.note = QLabel()
         self.note.setWordWrap(True)
@@ -456,11 +482,16 @@ class Params(QWidget):
         addr.addWidget(self.brk, 1)
         form.addRow("Adresse", addr)
         grid = QHBoxLayout()
+        grid.addWidget(self.auto)
+        grid.addSpacing(6)
         grid.addWidget(QLabel("X"))
         grid.addWidget(self.gx)
         grid.addSpacing(8)
         grid.addWidget(QLabel("Y"))
         grid.addWidget(self.gy)
+        grid.addSpacing(8)
+        grid.addWidget(QLabel("Z"))
+        grid.addWidget(self.gz)
         form.addRow("Grille", grid)
 
         lay = QVBoxLayout(self)
@@ -550,9 +581,13 @@ class Params(QWidget):
         self.address.setEnabled(b is not None)
         self.address.setValue(b.dmx_offset if b else 1)
         self.brk.setText(f"Break {b.dmx_break}" if b else ("sans adresse" if g.is_reference else "portée par les canaux"))
-        self.place = grid_place(g, ft)
+        self.place = (*grid_place(g, ft), grid_z(g, ft))
         self.gx.setValue(self.place[0])
         self.gy.setValue(self.place[1])
+        self.gz.setValue(self.place[2])
+        self._auto0 = grid_auto(g, ft)
+        self.auto.setChecked(not self._auto0)  # force le signal pour griser X/Y/Z
+        self.auto.setChecked(self._auto0)
         self.grid.set(g, ft)
         self.note.setText("Aucun canal dans aucun mode : sert seulement à la 3D, le nettoyeur "
                           "la retirera." if flag_3d else "")
@@ -569,8 +604,13 @@ class Params(QWidget):
         mesh = "" if self.mesh.currentText() == NO_MESH else self.mesh.currentText()
         if not g.is_reference and mesh != g.model and mesh != OTHER_GDTF:
             e.mesh = mesh
-        if (self.gx.value(), self.gy.value()) != self.place:
-            e.grid = (self.gx.value(), self.gy.value())
+        auto = self.auto.isChecked()
+        if not auto and (self.gx.value(), self.gy.value(), self.gz.value()) != self.place:
+            e.grid = (self.gx.value(), self.gy.value(), self.gz.value())
+        if auto != self._auto0:
+            e.grid_auto = auto
+            if not auto:  # passer à la main écrit la place affichée
+                e.grid = (self.gx.value(), self.gy.value(), self.gz.value())
         return e
 
 
@@ -703,20 +743,31 @@ class EditDialog(QDialog):
         el = geotree.element_of(ft, g)
         gx, gy = (el.get("GridX"), el.get("GridY")) if el is not None else (None, None)
         px, py = geotree.grid_proposal(g, ft)
-        self._grid0 = (int(gx), int(gy)) if gx is not None and gy is not None else None
-        self.gx, self.gy = QSpinBox(), QSpinBox()
-        for spin, v in ((self.gx, gx if gx is not None else px), (self.gy, gy if gy is not None else py)):
+        gz = grid_z(g, ft)
+        self._grid0 = (int(gx), int(gy), gz) if gx is not None and gy is not None else None
+        self.gx, self.gy, self.gz = QSpinBox(), QSpinBox(), QSpinBox()
+        for spin, v in ((self.gx, gx if gx is not None else px), (self.gy, gy if gy is not None else py),
+                        (self.gz, gz)):
             spin.setRange(0, 999)
             spin.setValue(int(v))
         propose = QPushButton("Proposer")
         propose.setToolTip("Place proposée d'après les positions 3D du GDTF")
-        propose.clicked.connect(lambda: (self.gx.setValue(px), self.gy.setValue(py)))
+        propose.clicked.connect(lambda: (self.auto.setChecked(False), self.gx.setValue(px), self.gy.setValue(py)))
+        self.auto = _auto_box((self.gx, self.gy, self.gz))
+        self._auto0 = grid_auto(g, ft)
+        self.auto.setChecked(not self._auto0)
+        self.auto.setChecked(self._auto0)
         grid = QHBoxLayout()
+        grid.addWidget(self.auto)
+        grid.addSpacing(10)
         grid.addWidget(QLabel("X"))
         grid.addWidget(self.gx, 1)
         grid.addSpacing(10)
         grid.addWidget(QLabel("Y"))
         grid.addWidget(self.gy, 1)
+        grid.addSpacing(10)
+        grid.addWidget(QLabel("Z"))
+        grid.addWidget(self.gz, 1)
         grid.addSpacing(10)
         grid.addWidget(propose)
         form.addRow("Grille", grid)
@@ -742,9 +793,14 @@ class EditDialog(QDialog):
                 e.breaks = vals
         if self.start is not None and self.start.value() != self._start0:
             e.start = (self.mode, self.start.value())
-        grid = (self.gx.value(), self.gy.value())
-        if grid != self._grid0:
+        grid = (self.gx.value(), self.gy.value(), self.gz.value())
+        auto = self.auto.isChecked()
+        if not auto and grid != self._grid0:
             e.grid = grid
+        if auto != self._auto0:
+            e.grid_auto = auto
+            if not auto:
+                e.grid = grid
         return e
 
 
