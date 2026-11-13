@@ -349,3 +349,39 @@ def test_charte_lue_sur_ma3(tmp_path):
         ("ColorRGB_R", [7]), ("ColorRGB_G", [8]), ("ColorRGB_B", [9]), ("Dimmer", [])]
     with pytest.raises(geotree.MoveError):
         charte_dmx.libre(ft, "Extended", "Ring 2")
+
+
+def test_nouvelle_geometrie_posee_dans_l_arbre(tmp_path):
+    """Zone « Géométries disponibles » : une géométrie neuve (nom + type) posée dans l'arbre."""
+    ft = _ma3_wash(tmp_path)
+    head = ft.geometry("Head")
+    el = geotree.new_geometry(ft, "Ring 1", "Beam")  # nom déjà pris -> « Ring 1 2 »
+    new, msg = geotree.add_geometry(ft, el, head, 1, mesh="Cube")
+    assert [g.name for g in new.geometry("Head").children] == ["Ring 1", "Ring 1 2", "Ring 2", "Ring 3"]
+    g = new.geometry("Ring 1 2")
+    assert g.kind == "Beam" and g.model == "Cube" and "nom déjà pris" in msg
+    assert _rings(new) == _rings(ft)  # rien ne bouge sur les canaux
+    with pytest.raises(geotree.MoveError, match="modèle"):
+        geotree.new_geometry(ft, "R", "GeometryReference")
+    grouped, _ = geotree.group(ft, [ft.geometry("Ring 1")], "Ring")
+    ref = geotree.new_geometry(grouped, "Ring 4", "GeometryReference", "Ring")
+    new2, msg2 = geotree.add_geometry(grouped, ref, grouped.geometry("Head"), 3)
+    r4 = new2.geometry("Ring 4")
+    assert r4.is_reference and r4.reference == "Ring" and r4.breaks[0].dmx_offset == 1 and "patch" in msg2
+    with pytest.raises(geotree.MoveError, match="référence"):
+        geotree.add_geometry(new2, geotree.new_geometry(new2, "X", "Beam"), r4, 0)
+
+
+def test_importer_une_geometrie_d_un_autre_fichier(tmp_path, good_bar):
+    """Import d'un GDTF vers un XML MA3 : sous-arbre copié, références recopiées, position convertie."""
+    ft = _ma3_wash(tmp_path)
+    other = geotree.importable(good_bar)
+    body = other.geometry("Body")
+    el = geotree.take_geometry(other, body, ft)
+    assert [x.tag for x in el] == ["Beam"] * 4  # les 4 références Pixel deviennent des Beams
+    assert not list(el.iter("Break"))
+    new, msg = geotree.add_geometry(ft, el, ft.geometry("Head"), 0)
+    assert [g.name for g in new.geometry("Body").children] == [f"Pixel{i}" for i in range(1, 5)]
+    assert "5 géométries" in msg
+    one = geotree.take_geometry(other, other.geometry("Pixel2"), ft)  # une référence seule
+    assert one.tag == "Beam" and one.get("Name") == "Pixel2"

@@ -1254,3 +1254,135 @@ def split_per_mode(ft: FixtureType) -> tuple[FixtureType, str]:
                         e.set(key, ".".join(segs))
     msg = f"{created} base(s) ajoutée(s) : chaque mode a maintenant la sienne"
     return restore(ft, ET.tostring(ft.xml_root, encoding="utf-8")), msg
+
+
+# --------------------------------------------------------------------------
+# E. Géométries disponibles (Jo, 13/11/2026) : créer une géométrie (nom + type) ou en
+# importer d'un autre fichier, puis la poser dans l'arbre. Elle arrive sans canal.
+
+NEW_KINDS = EDITABLE_KINDS + ("GeometryReference",)
+
+
+def new_geometry(ft: FixtureType, name: str, kind: str, model: str = "") -> ET.Element:
+    """Élément d'une géométrie neuve, au format du fixture (pas encore posé dans l'arbre)."""
+    name = name.strip()
+    if not name or "." in name:
+        raise MoveError("nom vide ou avec un point")
+    if kind not in NEW_KINDS:
+        raise MoveError(f"type « {kind} » inconnu")
+    el = ET.Element(kind, {"Name": name})
+    if ft.format == "ma3":
+        el.set("GridAuto", "Auto")
+    if kind == "GeometryReference":
+        if not model or ft.top_level(model) is None:
+            raise MoveError("choisis le modèle que la référence répète")
+        el.set("Geometry", model)
+        _add_break(ft, el, 1, 1)
+    return el
+
+
+def importable(path) -> FixtureType:
+    """Le fixture d'où l'on prend des géométries (GDTF ou XML MA3)."""
+    from . import gdtf
+    try:
+        other = gdtf.load(path)
+    except (gdtf.GdtfError, OSError) as exc:
+        raise MoveError(f"fichier illisible : {exc}") from exc
+    if other.xml_root is None or not other.geometries:
+        raise MoveError("aucune géométrie dans ce fichier")
+    return other
+
+
+def take_geometry(other: FixtureType, g: Geometry, ft: FixtureType) -> ET.Element:
+    """Copie de `g` (avec ses enfants) prise dans `other`, écrite au format de `ft`.
+    Les références qu'elle contient deviennent des copies de leur modèle (pas de canaux)."""
+    import copy
+    from . import ma3xml
+    src = element_of(other, g)
+    if src is None:
+        raise MoveError(f"« {g.name} » introuvable dans {other.name}")
+    if g.is_reference:  # la référence elle-même : une copie de son modèle, à sa place
+        tpl = element_of(other, other.top_level(g.reference))
+        if tpl is None:
+            raise MoveError(f"modèle « {g.reference} » introuvable dans {other.name}")
+        el = copy.deepcopy(tpl)
+        el.set("Name", g.name)
+        for k in _pos_keys(other):
+            el.attrib.pop(k, None)
+            if src.get(k):
+                el.set(k, src.get(k))
+    else:
+        el = copy.deepcopy(src)
+    _inline_references(other, el)
+    for x in el.iter():
+        x.tail = None
+        if x.tag == "Break":
+            continue
+        if other.format == "gdtf" and ft.format == "ma3" and x.get("Position") is not None:
+            x.attrib.update(ma3xml._position_attrs(x.attrib.pop("Position")))
+        elif other.format == "ma3" and ft.format == "gdtf":
+            # translation gardée ; une rotation MA3 (degrés) n'est pas recalculée en matrice
+            t = [x.attrib.pop(f"Pos{a}", "0") for a in "XYZ"]
+            for a in "XYZ":
+                x.attrib.pop(f"Rot{a}", None)
+            if any(float(v or 0) for v in t):
+                x.set("Position", "{1,0,0,%s}{0,1,0,%s}{0,0,1,%s}{0,0,0,1}" % tuple(t))
+    return el
+
+
+def add_geometry(ft: FixtureType, el: ET.Element, parent: Geometry, index: int,
+                 mesh: str = "") -> tuple[FixtureType, str]:
+    """Pose une copie de `el` sous `parent`, au rang `index`. Un nom déjà pris reçoit un
+    numéro (« Pixel 2 »). Un mesh absent de ce fixture est retiré (la géométrie reste)."""
+    import copy
+    if parent is None:
+        raise MoveError("choisis d'abord où la poser dans l'arbre")
+    if parent.is_reference:
+        raise MoveError(f"« {parent.name} » est une référence : elle ne peut pas avoir d'enfant")
+    parent_el = element_of(ft, parent)
+    if parent_el is None:
+        raise MoveError(f"« {parent.name} » introuvable dans l'XML")
+    new = copy.deepcopy(el)
+    geos = [x for x in new.iter() if x.tag in GEOMETRY_TAGS]
+    for x in geos:
+        if x.tag == "GeometryReference" and ft.top_level(x.get("Geometry", "")) is None:
+            raise MoveError(f"le modèle « {x.get('Geometry')} » n'existe pas dans ce fixture")
+    taken = {g.name for g in ft.all_geometries()}
+    renamed = []
+    for x in geos:
+        name = x.get("Name", "") or x.tag
+        if name in taken:
+            base, n = name, 2
+            while f"{base} {n}" in taken:
+                n += 1
+            name = f"{base} {n}"
+            renamed.append(name)
+            x.set("Name", name)
+        taken.add(name)
+    have = {m.get("Name") for m in ft.xml_root.iterfind("FixtureType/Models/Model")}
+    dropped = 0
+    want_mesh: list[tuple[str, str]] = []  # formes de la banque / de la console, créées ensuite
+    for x in geos:
+        m = x.get("Model")
+        if m and m not in have:
+            x.attrib.pop("Model")
+            if m in meshes(ft):
+                want_mesh.append((x.get("Name"), m))
+            else:
+                dropped += 1
+    _insert_xml(parent_el, new, parent, index)
+    top = new.get("Name")
+    if mesh and new.tag != "GeometryReference":
+        want_mesh.append((top, mesh))
+    out = restore(ft, ET.tostring(ft.xml_root, encoding="utf-8"))
+    for name, m in want_mesh:
+        out, _ = apply_edit(out, out.geometry(name), Edit(mesh=m))
+    n = len(geos)
+    msg = f"« {top} » posée sous « {parent.name} »" + (f" ({n} géométries)" if n > 1 else "")
+    if renamed:
+        msg += f" ; nom déjà pris : {', '.join(renamed[:3])}"
+    if dropped:
+        msg += f" ; {dropped} mesh absent(s) de ce fixture retiré(s)"
+    if new.tag == "GeometryReference":
+        msg += " ; règle son adresse (patch) dans le panneau"
+    return out, msg

@@ -16,11 +16,11 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
+from PySide6.QtCore import QMimeData, QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QDrag, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                                QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
-                               QScrollArea, QSpinBox, QVBoxLayout, QWidget)
+                               QScrollArea, QSpinBox, QSplitter, QVBoxLayout, QWidget)
 
 from .. import charte_dmx, compare, diagnostic, gdtf, geotree
 from ..gdtf import FixtureType, Geometry
@@ -35,6 +35,7 @@ INDENT = 20
 MARGIN = 12
 TYPES = ["Geometry", "Beam", "Axis", "GeometryReference", "FilterColor", "FilterGobo", "Display"]
 BADGE = {"Geometry": "GEO", "Beam": "BEAM", "Axis": "AXIS", "GeometryReference": "RÉF"}
+PIECE_MIME = "application/x-banane-pot-geometrie"  # glisser une géométrie disponible dans l'arbre
 
 
 @dataclass
@@ -50,6 +51,7 @@ class GeoTree(QWidget):
     dropped = Signal(list, object, int)  # géométries, nouveau parent, rang
     menuAsked = Signal(object)  # position globale du clic droit
     editAsked = Signal(object)  # double-clic : popup des paramètres
+    pieceDropped = Signal(int, object, int)  # géométrie disponible n°, parent, rang
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -72,6 +74,8 @@ class GeoTree(QWidget):
         self._press_row: Optional[_Row] = None
         self._dragging = False
         self._drop: Optional[tuple[_Row, str]] = None  # (ligne visée, "avant" / "dans" / "après")
+        self._drag_label = ""  # nom affiché pendant un glisser venu de la zone de droite
+        self.setAcceptDrops(True)
 
     def set_root(self, root, useless: set[str], doubles: set[str],
                  idents: Optional[dict[str, str]] = None, copies: Optional[dict[str, int]] = None,
@@ -225,7 +229,8 @@ class GeoTree(QWidget):
             n = len(self.selection)
             p.setPen(theme.ACCENT)
             p.setFont(theme.font(9, True))
-            p.drawText(self._drag_pos + QPointF(14, -6), f"{n} géométrie(s)" if n > 1 else self.selection[0].name)
+            label = self._drag_label or (f"{n} géométrie(s)" if n > 1 else self.selection[0].name)
+            p.drawText(self._drag_pos + QPointF(14, -6), label)
 
     def _row_at(self, pos) -> Optional[_Row]:
         return next((r for r in self._rows if r.rect.contains(pos)), None)
@@ -274,7 +279,7 @@ class GeoTree(QWidget):
         if r and e.button() == Qt.LeftButton and e.position().x() >= r.rect.left() + 24:
             self.editAsked.emit(r.geo)
 
-    def _drop_at(self, pos) -> Optional[tuple[_Row, str]]:
+    def _drop_at(self, pos, geos: Optional[list] = None) -> Optional[tuple[_Row, str]]:
         r = self._row_at(pos) or next((x for x in self._rows
                                         if x.rect.top() - GAP_Y <= pos.y() <= x.rect.bottom() + GAP_Y), None)
         if r is None:
@@ -284,9 +289,42 @@ class GeoTree(QWidget):
         if r.geo.parent is None or (zone == "dans" and r.geo.is_reference):
             zone = "dans"
         parent, _ = self._target(r, zone)
-        if parent is None or any(geotree.check(g, parent) for g in self.selection):
+        moving = self.selection if geos is None else geos
+        if parent is None or parent.is_reference or any(geotree.check(g, parent) for g in moving):
             return None
         return r, zone
+
+    # glisser une géométrie disponible (zone de droite) dans l'arbre
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasFormat(PIECE_MIME):
+            e.acceptProposedAction()
+
+    def dragMoveEvent(self, e):
+        if not e.mimeData().hasFormat(PIECE_MIME):
+            return
+        self._drop = self._drop_at(e.position(), [])
+        self._dragging = self._drop is not None
+        self._drag_pos = e.position()
+        self._drag_label = e.mimeData().text()
+        e.setAccepted(self._drop is not None)
+        self.update()
+
+    def dragLeaveEvent(self, e):
+        self._dragging, self._drop, self._drag_label = False, None, ""
+        self.update()
+
+    def dropEvent(self, e):
+        drop = self._drop_at(e.position(), []) if e.mimeData().hasFormat(PIECE_MIME) else None
+        self._dragging, self._drop, self._drag_label = False, None, ""
+        self.update()
+        if drop is None:
+            return
+        row, zone = drop
+        parent, index = self._target(row, zone)
+        if zone == "dans":
+            self.collapsed.discard(row.geo.name)
+        e.acceptProposedAction()
+        self.pieceDropped.emit(int(bytes(e.mimeData().data(PIECE_MIME)).decode()), parent, index)
 
     @staticmethod
     def _target(r: _Row, zone: str) -> tuple[Optional[Geometry], int]:
@@ -375,11 +413,15 @@ class MiniGrid(QWidget):
     """Grille façon Fixture Hero : les géométries sœurs à leur vraie place, la choisie en jaune.
     16 pixels en ligne = une seule ligne de 16 (Jo, 11/11/2026), jamais de retour à la ligne."""
 
+    placed = Signal(int, int)  # case jaune glissée : nouvelle place X, Y
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.cells: list[tuple[int, int]] = []
         self.current: Optional[tuple[int, int]] = None
+        self._hold: Optional[tuple[int, int]] = None  # case visée pendant le glisser
         self.setMinimumHeight(170)
+        self.setToolTip("Glisse la case jaune pour placer la géométrie (grille à la main)")
 
     def set(self, geo: Optional[Geometry], ft=None) -> None:
         sibs = geo.parent.children if geo and geo.parent else ([geo] if geo else [])
@@ -388,11 +430,43 @@ class MiniGrid(QWidget):
         self.update()
 
     def layout(self) -> tuple[int, int, float]:
-        """Colonnes, lignes et taille d'une case : les cases rétrécissent pour tout faire tenir."""
-        cols = max(x for x, _ in self.cells) + 1
-        rows = max(y for _, y in self.cells) + 1
+        """Colonnes, lignes et taille d'une case : les cases rétrécissent pour tout faire tenir.
+        Une colonne et une ligne vides en plus, pour pouvoir y glisser la case jaune."""
+        cols = max(x for x, _ in self.cells) + 2
+        rows = max(y for _, y in self.cells) + 2
         size = min(26.0, (self.width() - 20) / cols, (self.height() - 20) / rows)
         return cols, rows, max(size, 2.0)
+
+    def _origin(self) -> tuple[float, float, float]:
+        cols, rows, size = self.layout()
+        return (self.width() - cols * size) / 2, (self.height() - rows * size) / 2, size
+
+    def _cell_at(self, pos) -> Optional[tuple[int, int]]:
+        if not self.cells:
+            return None
+        cols, rows, _ = self.layout()
+        x0, y0, size = self._origin()
+        cx, cy = int((pos.x() - x0) // size), int((pos.y() - y0) // size)
+        return (cx, cy) if 0 <= cx < cols and 0 <= cy < rows else None
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self.current is not None and self._cell_at(e.position()) == self.current:
+            self._hold = self.current
+            self.setCursor(Qt.ClosedHandCursor)
+
+    def mouseMoveEvent(self, e):
+        if self._hold is not None:
+            self._hold = self._cell_at(e.position()) or self._hold
+            self.update()
+
+    def mouseReleaseEvent(self, e):
+        if self._hold is not None:
+            cell, self._hold = self._hold, None
+            self.unsetCursor()
+            if cell != self.current:
+                self.current = cell
+                self.placed.emit(*cell)
+            self.update()
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -401,13 +475,16 @@ class MiniGrid(QWidget):
             return
         cols, rows, size = self.layout()
         gap = 3 if size >= 10 else 1
-        x0 = (self.width() - cols * size) / 2
-        y0 = (self.height() - rows * size) / 2
+        x0, y0, size = self._origin()
         for cell in sorted(set(self.cells), key=lambda c: c == self.current):
             on = cell == self.current
             p.setPen(QPen(theme.ACCENT if on else theme.ROW_HOVER, 2 if size >= 10 else 1))
             p.setBrush(theme.ACCENT if on else theme.BG)
             p.drawRect(QRectF(x0 + cell[0] * size, y0 + cell[1] * size, size - gap, size - gap))
+        if self._hold is not None and self._hold != self.current:  # où la case jaune va tomber
+            p.setPen(QPen(theme.ACCENT, 2, Qt.DashLine))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(QRectF(x0 + self._hold[0] * size, y0 + self._hold[1] * size, size - gap, size - gap))
 
 
 NEW_MODEL = "Nouveau modèle…"
@@ -450,6 +527,7 @@ class Params(QWidget):
             s.setRange(0, 999)
         self.auto = _auto_box((self.gx, self.gy, self.gz))
         self.grid = MiniGrid()
+        self.grid.placed.connect(self._placed)
         self.note = QLabel()
         self.note.setWordWrap(True)
         self.note.setObjectName("dim")
@@ -544,6 +622,13 @@ class Params(QWidget):
             item.setData(Qt.UserRole, r.attribute)
             self.channels.addItem(item)
         self._chan_buttons()
+
+    def _placed(self, x: int, y: int) -> None:
+        """Case jaune glissée dans la petite grille : grille à la main, X/Y, appliqué tout de suite."""
+        self.auto.setChecked(False)
+        self.gx.setValue(x)
+        self.gy.setValue(y)
+        self.applied.emit()
 
     def _kind_changed(self, kind: str) -> None:
         self.model.setEnabled(kind == REF)
@@ -809,6 +894,261 @@ class EditDialog(QDialog):
         return e
 
 
+# --------------------------------------------------------------------------
+# Zone de droite : géométries disponibles (Jo, 13/11/2026) — créées (nom + type) ou importées
+# d'un autre fichier, à glisser dans l'arbre.
+
+@dataclass
+class Piece:
+    name: str
+    kind: str
+    source: str  # « nouvelle » ou « importée · <fixture> »
+    build: object  # fonction (fixture) -> (élément XML, mesh) au format de ce fixture
+    count: int = 1  # géométries dans le sous-arbre
+
+
+class PieceList(QWidget):
+    """Les géométries disponibles, en lignes comme l'arbre ; on les glisse dans l'arbre."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.pieces: list[Piece] = []
+        self.current = -1
+        self._press: Optional[QPointF] = None
+        self.setMinimumHeight(60)
+
+    def set_pieces(self, pieces: list[Piece]) -> None:
+        self.pieces = pieces
+        self.current = min(self.current, len(pieces) - 1)
+        self.setMinimumHeight(max(60, len(pieces) * 34 + 8))
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.fillRect(self.rect(), theme.BG)
+        if not self.pieces:
+            p.setPen(theme.TEXT_DIM)
+            p.setFont(theme.font(9))
+            p.drawText(self.rect(), Qt.AlignCenter, "Crée ou importe une géométrie")
+            return
+        for i, pc in enumerate(self.pieces):
+            r = QRectF(4, 4 + i * 34, self.width() - 8, 30)
+            sel = i == self.current
+            p.setPen(Qt.NoPen)
+            p.setBrush(theme.HEADER if sel else theme.ROW)
+            p.drawRoundedRect(r, 5, 5)
+            badge = BADGE.get(pc.kind, pc.kind[:4].upper())
+            p.setFont(theme.font(7, True))
+            bw = p.fontMetrics().horizontalAdvance(badge) + 12
+            br = QRectF(r.left() + 10, r.center().y() - 9, bw, 18)
+            p.setBrush(theme.STATUS["bleu"] if pc.kind == "Beam" else theme.ROW_HOVER)
+            p.drawRoundedRect(br, 9, 9)
+            p.setPen(theme.TEXT)
+            p.drawText(br, Qt.AlignCenter, badge)
+            p.setFont(theme.font(10, sel))
+            name = pc.name + (f"  ({pc.count})" if pc.count > 1 else "")
+            src_w = int(r.width() * 0.45)
+            p.drawText(QRectF(br.right() + 10, r.top(), r.right() - br.right() - src_w - 20, 30),
+                       Qt.AlignVCenter, name)
+            p.setFont(theme.font(9))
+            p.setPen(theme.TEXT_DIM)
+            p.drawText(QRectF(r.right() - src_w - 10, r.top(), src_w, 30), Qt.AlignVCenter | Qt.AlignRight,
+                       p.fontMetrics().elidedText(pc.source, Qt.ElideLeft, src_w))
+
+    def _index_at(self, pos) -> int:
+        i = int((pos.y() - 4) // 34)
+        return i if 0 <= i < len(self.pieces) else -1
+
+    def mousePressEvent(self, e):
+        self.current = self._index_at(e.position())
+        self._press = e.position() if self.current >= 0 else None
+        self.update()
+
+    def mouseMoveEvent(self, e):
+        if self._press is None or not (e.buttons() & Qt.LeftButton):
+            return
+        if (e.position() - self._press).manhattanLength() < 8:
+            return
+        self._press = None
+        data = QMimeData()
+        data.setData(PIECE_MIME, str(self.current).encode())
+        data.setText(self.pieces[self.current].name)
+        drag = QDrag(self)
+        drag.setMimeData(data)
+        drag.exec(Qt.CopyAction)
+
+
+class GeoBank(QWidget):
+    """Créer une géométrie (nom, type, modèle, mesh) ou en importer ; « Géométries disponibles »."""
+
+    importAsked = Signal()
+    addAsked = Signal(int)  # « Ajouter sous la sélection »
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.pieces: list[Piece] = []
+        title = QLabel("Géométries")
+        title.setFont(theme.font(12, True))
+        hint = QLabel("Crée ou importe des géométries, puis glisse-les dans l'arbre.")
+        hint.setObjectName("dim")
+        hint.setWordWrap(True)
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("ex. Pixel")
+        self.kind = QComboBox()
+        self.kind.addItems(list(geotree.NEW_KINDS))
+        self.kind.setCurrentText("Beam")
+        self.kind.currentTextChanged.connect(self._kind_changed)
+        self.model = QComboBox()
+        self.model.setPlaceholderText("pour une référence")
+        self.mesh = QComboBox()
+        self.create = QPushButton("+ Créer")
+        self.create.setFont(theme.font(10, True))
+        self.create.clicked.connect(self._create)
+        self.name.returnPressed.connect(self._create)
+        self.list = PieceList()
+        imp = QPushButton("Importer d'un fichier…")
+        imp.setToolTip("Prendre des géométries (avec leurs enfants) dans un GDTF ou un XML de la console")
+        imp.clicked.connect(lambda: self.importAsked.emit())
+        add = QPushButton("Ajouter sous la sélection")
+        add.clicked.connect(lambda: self.addAsked.emit(self.list.current) if self.list.current >= 0 else None)
+        rem = QPushButton("Retirer")
+        rem.setToolTip("Retire de la liste (pas de l'arbre)")
+        rem.clicked.connect(self._remove)
+        self.message = QLabel()
+        self.message.setObjectName("dim")
+        self.message.setWordWrap(True)
+
+        def section(text):
+            lab = QLabel(text)
+            lab.setFont(theme.font(9, True))
+            lab.setObjectName("dim")
+            return lab
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 10)
+        lay.setSpacing(8)
+        lay.addWidget(title)
+        lay.addWidget(hint)
+        lay.addSpacing(4)
+        lay.addWidget(section("NOUVELLE GÉOMÉTRIE"))
+        form = QFormLayout()
+        form.setHorizontalSpacing(14)
+        form.addRow("Nom", self.name)
+        form.addRow("Type", self.kind)
+        form.addRow("Modèle", self.model)
+        form.addRow("Mesh", self.mesh)
+        lay.addLayout(form)
+        row = QHBoxLayout()
+        row.addWidget(self.message, 1)
+        row.addWidget(self.create)
+        lay.addLayout(row)
+        lay.addSpacing(8)
+        lay.addWidget(section("GÉOMÉTRIES DISPONIBLES  —  à glisser dans l'arbre"))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.list)
+        scroll.setMinimumHeight(150)
+        lay.addWidget(scroll, 1)
+        buttons = QHBoxLayout()
+        for b in (imp, add, rem):
+            buttons.addWidget(b)
+        lay.addLayout(buttons)
+        tip = QLabel("Glisser sur une ligne = enfant de cette ligne · entre deux lignes = à cette place.\n"
+                     "Une géométrie posée arrive sans canal.")
+        tip.setObjectName("dim")
+        tip.setWordWrap(True)
+        lay.addWidget(tip)
+        self._kind_changed(self.kind.currentText())
+        self.ft: Optional[FixtureType] = None
+
+    def set_fixture(self, ft: Optional[FixtureType]) -> None:
+        """Modèles (pour une référence) et meshes de ce fixture."""
+        self.ft = ft
+        for combo, items in ((self.model, geotree.models(ft) if ft else []),
+                             (self.mesh, [NO_MESH] + (geotree.meshes(ft) if ft else []))):
+            cur = combo.currentText()
+            combo.clear()
+            combo.addItems(items)
+            if cur and combo.findText(cur) >= 0:
+                combo.setCurrentText(cur)
+        if self.model.currentIndex() < 0 and self.model.count():
+            self.model.setCurrentIndex(0)
+        self._kind_changed(self.kind.currentText())
+
+    def _kind_changed(self, kind: str) -> None:
+        ref = kind == "GeometryReference"
+        self.model.setEnabled(ref)
+        self.mesh.setEnabled(not ref)  # une référence prend le mesh de son modèle
+
+    def _create(self) -> None:
+        name, kind = self.name.text().strip(), self.kind.currentText()
+        model = self.model.currentText() if kind == "GeometryReference" else ""
+        mesh = "" if kind == "GeometryReference" or self.mesh.currentText() in ("", NO_MESH) else self.mesh.currentText()
+        if self.ft is not None:  # vérifié tout de suite : nom, modèle
+            try:
+                geotree.new_geometry(self.ft, name, kind, model)
+            except geotree.MoveError as exc:
+                self.message.setText(f"Impossible : {exc}")
+                QMessageBox.warning(self, "Impossible", str(exc)[:1].upper() + str(exc)[1:])
+                return
+        label = f"{name}  → {model}" if model else name
+        self.add(Piece(label, kind, "nouvelle",
+                       lambda ft, n=name, k=kind, m=model, me=mesh: (geotree.new_geometry(ft, n, k, m), me)))
+        self.message.setText("")
+        self.name.clear()
+
+    def add(self, piece: Piece) -> None:
+        self.pieces.append(piece)
+        self.list.current = len(self.pieces) - 1
+        self.list.set_pieces(self.pieces)
+
+    def _remove(self) -> None:
+        i = self.list.current
+        if 0 <= i < len(self.pieces):
+            del self.pieces[i]
+            self.list.set_pieces(self.pieces)
+
+
+class ImportDialog(QDialog):
+    """Choisir les géométries à prendre dans un autre fichier (arbre indenté, plusieurs à la fois)."""
+
+    def __init__(self, other: FixtureType, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Importer de « {other.manufacturer} - {other.name} »")
+        self.resize(520, 560)
+        self.items: list[Geometry] = []
+        self.list = QListWidget()
+        self.list.setSelectionMode(QListWidget.ExtendedSelection)
+
+        def add(g: Geometry, depth: int) -> None:
+            badge = BADGE.get(g.kind, g.kind[:4].upper())
+            extra = f"  → {g.reference}" if g.is_reference else (f"   ({len(list(g.walk())) - 1} enfants)"
+                                                                  if g.children else "")
+            self.list.addItem(QListWidgetItem("      " * depth + f"[{badge}]  {g.name}{extra}"))
+            self.items.append(g)
+            for c in g.children:
+                add(c, depth + 1)
+
+        for top in other.geometries:
+            add(top, 0)
+        info = QLabel("Choisis une ou plusieurs géométries (Ctrl / Maj). Chacune arrive avec ses enfants ; "
+                      "une référence arrive comme une copie de son modèle. Aucun canal n'est copié.")
+        info.setWordWrap(True)
+        info.setObjectName("dim")
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Importer")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addWidget(info)
+        lay.addWidget(self.list, 1)
+        lay.addWidget(buttons)
+
+    def chosen(self) -> list[Geometry]:
+        return [self.items[self.list.row(it)] for it in self.list.selectedItems()]
+
+
 class AtelierWindow(QMainWindow):
     shareAsked = Signal()  # l'appli ouvre l'explorateur GDTF Share
     compareAsked = Signal(str)  # « source » ou « cible » : l'appli pose le fixture dans le comparateur
@@ -848,10 +1188,30 @@ class AtelierWindow(QMainWindow):
         self.params.setFixedWidth(400)
         self.params.applied.connect(self._apply_params)
         self.params.channelAsked.connect(self._channel)
+        self.tree.pieceDropped.connect(self._place_piece)
+        self.bank = GeoBank()
+        self.bank.importAsked.connect(self._import_pieces)
+        self.bank.addAsked.connect(self._add_piece_here)
+        left = QWidget()
+        lh = QHBoxLayout(left)
+        lh.setContentsMargins(0, 0, 0, 0)
+        lh.setSpacing(0)
+        lh.addWidget(scroll, 1)
+        lh.addWidget(self.params)
+        # Jo, 13/11/2026 : création à droite, avec son séparateur vertical
+        self.split = QSplitter(Qt.Horizontal)
+        self.split.setHandleWidth(8)
+        self.split.setChildrenCollapsible(False)
+        self.split.addWidget(left)
+        self.split.addWidget(self.bank)
+        self.split.setStretchFactor(0, 3)
+        self.split.setStretchFactor(1, 1)
+        self.split.setStyleSheet(f"QSplitter::handle {{ background: {theme.PANEL.name()}; "
+                                 f"border-left: 1px solid {theme.ROW_HOVER.name()}; "
+                                 f"border-right: 1px solid {theme.ROW_HOVER.name()}; }}")
         mid = QHBoxLayout()
         mid.setSpacing(0)
-        mid.addWidget(scroll, 1)
-        mid.addWidget(self.params)
+        mid.addWidget(self.split, 1)
 
         self.summary = QLabel()
         self.summary.setFont(theme.font(10))
@@ -923,6 +1283,7 @@ class AtelierWindow(QMainWindow):
         self.modes.blockSignals(False)
         self.export_button.setEnabled(True)
         self.compare_button.setEnabled(True)
+        self.bank.set_fixture(self.ft)
         self.split_button.setEnabled(True)  # toujours cliquables : un refus s'explique (Jo, 13/11/2026)
         self.strip_button.setEnabled(True)
         self._mode_changed()
@@ -1017,6 +1378,7 @@ class AtelierWindow(QMainWindow):
 
     def _after_change(self, message: str) -> None:
         self._diagnose()
+        self.bank.set_fixture(self.ft)  # nouveaux modèles / meshes
         mode = self.ft.mode(self.modes.currentText())
         root = self.ft.top_level(mode.geometry) if mode else None
         self.tree.refresh(root, self.useless, self.doubles, self._idents(), self.copies,
@@ -1052,6 +1414,54 @@ class AtelierWindow(QMainWindow):
         self.history.append(before)
         self._last = message
         return True
+
+    def _place_piece(self, i: int, parent: Geometry, index: int) -> None:
+        """Une géométrie disponible lâchée dans l'arbre : posée sans canal, Ctrl+Z annule."""
+        if not self.ft or not 0 <= i < len(self.bank.pieces):
+            return
+        piece = self.bank.pieces[i]
+
+        def place(ft):
+            el, mesh = piece.build(ft)
+            return geotree.add_geometry(ft, el, parent, index, mesh)
+
+        if self._apply(place):
+            self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
+
+    def _add_piece_here(self, i: int) -> None:
+        """« Ajouter sous la sélection » : en dernier enfant de la ligne choisie ; sur une
+        référence (qui n'a pas d'enfant), juste après elle."""
+        g = self.tree.current
+        if g is None:
+            self._refuse("choisis d'abord une ligne dans l'arbre")
+            return
+        if g.is_reference:
+            self._place_piece(i, g.parent, g.parent.children.index(g) + 1)
+        else:
+            self._place_piece(i, g, len(g.children))
+
+    def _import_pieces(self) -> None:
+        if not self.ft:
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Importer des géométries", "",
+                                              "Fixtures (*.gdtf *.xml);;GDTF (*.gdtf);;XML MA3 (*.xml)")
+        if not path:
+            return
+        try:
+            other = geotree.importable(path)
+        except geotree.MoveError as exc:
+            self._refuse(str(exc))
+            return
+        dlg = ImportDialog(other, self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        for g in dlg.chosen():
+            kind = (other.top_level(g.reference).kind if g.is_reference and other.top_level(g.reference)
+                    else g.kind)
+            self.bank.add(Piece(g.name, kind, f"importée · {other.name}",
+                                lambda ft, o=other, x=g: (geotree.take_geometry(o, x, ft), ""),
+                                len(list(g.walk()))))
+        self.status.setText(f"{len(dlg.chosen())} géométrie(s) de « {other.name} » ajoutée(s) aux disponibles")
 
     def _move(self, geos: list, parent: Geometry, index: int) -> None:
         if self._apply(geotree.move, geos, parent, index):

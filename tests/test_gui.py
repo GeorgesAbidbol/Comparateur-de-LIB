@@ -194,7 +194,7 @@ def test_mini_grid_keeps_16_pixels_on_one_row(tmp_path):
     grid.set(ft.geometry("Array 120"), ft)
     assert grid.cells == [(i, 0) for i in range(16)] and grid.current == (11, 0)
     cols, rows, size = grid.layout()
-    assert (cols, rows) == (16, 1) and cols * size <= 380
+    assert (cols, rows) == (17, 2) and cols * size <= 380  # + 1 colonne et 1 ligne vides pour glisser
     grid.grab()
 
 
@@ -585,3 +585,51 @@ def test_params_grille_z(tmp_path):
 def atelier_geotree():
     from ma3lib import geotree
     return geotree
+
+
+def test_zone_geometries_disponibles(tmp_path, good_bar, monkeypatch):
+    """Jo (13/11/2026) : à droite, créer ou importer une géométrie puis la poser dans l'arbre ;
+    la petite grille se glisse."""
+    from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
+    from ma3lib.gui import atelier
+    from ma3lib.gui.atelier import AtelierWindow
+    from test_geotree import _ma3_wash
+
+    app = QApplication.instance() or QApplication([])
+    ft = _ma3_wash(tmp_path)
+    win = AtelierWindow()
+    win.load(str(ft.source), "Extended")
+    win.show()
+    app.processEvents()
+    bank = win.bank
+    assert win.split.count() == 2 and win.split.widget(1) is bank  # création à droite
+    bank.name.setText("Pixel")
+    bank.kind.setCurrentText("Beam")
+    bank.mesh.setCurrentText("Cube")
+    bank._create()
+    assert [p.name for p in bank.pieces] == ["Pixel"]
+    win.tree.current = win.ft.geometry("Head")
+    win._add_piece_here(0)
+    g = win.ft.geometry("Pixel")
+    assert g is not None and g.parent.name == "Head" and g.model == "Cube"
+    assert "posée sous « Head »" in win.status.text()
+    win.tree.pieceDropped.emit(0, win.ft.geometry("Head"), 0)  # même chose en glissant : « Pixel 2 »
+    assert win.ft.geometry("Head").children[0].name == "Pixel 2"
+    win.undo()
+    assert win.ft.geometry("Pixel 2") is None and win.ft.geometry("Pixel") is not None
+    # importer d'un GDTF
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(good_bar), ""))
+    monkeypatch.setattr(atelier.ImportDialog, "exec", lambda self: QDialog.Accepted)
+    monkeypatch.setattr(atelier.ImportDialog, "chosen", lambda self: [x for x in self.items if x.name == "Body"])
+    win._import_pieces()
+    assert bank.pieces[-1].source.startswith("importée") and bank.pieces[-1].count == 5
+    win.tree.pieceDropped.emit(1, win.ft.geometry("Base"), 0)
+    assert [c.name for c in win.ft.geometry("Body").children] == [f"Pixel{i}" for i in range(1, 5)]
+    # petite grille : on glisse la case jaune
+    ring = win.ft.geometry("Ring 2")
+    win.tree.current = ring
+    win._select(ring)
+    win.params.grid.placed.emit(3, 1)
+    el = atelier.geotree.element_of(win.ft, win.ft.geometry("Ring 2"))
+    assert (el.get("GridAuto"), el.get("GridX"), el.get("GridY")) == ("Manual", "3", "1")
+    win.close()
