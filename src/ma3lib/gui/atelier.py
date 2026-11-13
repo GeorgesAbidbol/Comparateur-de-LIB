@@ -592,7 +592,7 @@ class Params(QWidget):
         lay.addWidget(self.note)
         lay.addStretch(1)
         self.setStyleSheet(f"QLineEdit, QSpinBox {{ background: {theme.ROW.name()}; border: none;"
-                           f" border-radius: 6px; padding: 6px 10px; }}"
+                           f" border-radius: 6px; padding: 6px 24px 6px 10px; }}"
                            f"QSpinBox:disabled {{ color: {theme.TEXT_DIM.name()}; }}"
                            f"QListWidget {{ background: {theme.PANEL.name()}; border: none; border-radius: 8px;"
                            f" padding: 4px; outline: none; }}"
@@ -736,7 +736,7 @@ class ChannelDialog(QDialog):
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
         self.setStyleSheet(f"QLineEdit {{ background: {theme.ROW.name()}; border: none;"
-                           f" border-radius: 6px; padding: 6px 10px; }}")
+                           f" border-radius: 6px; padding: 6px 24px 6px 10px; }}")
 
     def values(self) -> tuple[str, Optional[list[int]], str]:
         """(attribut, adresses ou None si illisibles, défaut)."""
@@ -776,7 +776,7 @@ class DuplicateDialog(QDialog):
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
         self.setStyleSheet(f"QSpinBox {{ background: {theme.ROW.name()}; border: none;"
-                           f" border-radius: 6px; padding: 6px 10px; }}")
+                           f" border-radius: 6px; padding: 6px 24px 6px 10px; }}")
 
     def values(self) -> tuple[int, list[int]]:
         return self.count.value(), [s.value() for s in self.steps]
@@ -903,7 +903,7 @@ class EditDialog(QDialog):
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
         self.setStyleSheet(f"QLineEdit, QSpinBox {{ background: {theme.ROW.name()}; border: none;"
-                           f" border-radius: 6px; padding: 6px 10px; }}")
+                           f" border-radius: 6px; padding: 6px 24px 6px 10px; }}")
 
     def _fill_channels(self) -> None:
         rows = self._rows()
