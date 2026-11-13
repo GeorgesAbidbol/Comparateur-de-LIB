@@ -52,7 +52,7 @@ class Canal:
     fine: Optional[int] = None
     nom: str = ""  # texte de la notice
     attribut: str = ""  # attribut GDTF / MA3 ; vide = à deviner
-    geometrie: str = ""  # vide = Yoke pour Pan, Head pour le reste
+    geometrie: str = ""  # vide = Yoke pour Pan, Base pour les contrôles, Head pour le reste
     copies: int = 1  # > 1 : la géométrie devient un modèle + N références
     defaut: int = 0
     plages: list[Plage] = field(default_factory=list)
@@ -431,10 +431,37 @@ def verifier(projet: Projet) -> list[str]:
     return out
 
 
+def est_controle(attribut: str) -> bool:
+    """Réglage du projecteur entier (Control1, NoFeature, Fans, LEDFrequency…) : la « feature » Control."""
+    if re.match(r"^(Control|NoFeature)\d*$", attribut):
+        return True
+    known = attributs.ma3_known(attributs.ma3_name(attribut))
+    return bool(known) and known.get("feature", "").startswith("Control.")
+
+
 def _geo_name(c: Canal) -> str:
+    """Géométrie d'un canal sans nom de géométrie : Yoke pour le pan, Base pour les contrôles
+    (règle de Jo, 13/11/2026 : « le control toujours sur la géométrie Base »), Head pour le reste."""
     if c.geometrie:
         return _clean(c.geometrie)
+    if est_controle(c.attribut):
+        return BASE
     return YOKE if c.attribut in ("Pan", "PanRotate") else HEAD
+
+
+def nom_court(nom: str) -> str:
+    """Libellé de contrôle réduit à l'essentiel (Jo, 13/11/2026) : sans les précisions entre
+    parenthèses ni la durée d'appui. « Linear dimming curve – 1 sec. (menu override, …) » -> « Linear dimming curve »."""
+    t = re.sub(r"\([^)]*\)?", " ", nom)
+    t = re.sub(r"[–—-]?\s*\d+\s*sec\.?(onds?)?\b\.?", " ", t, flags=re.I)
+    t = re.sub(r"\s+", " ", t).strip(" .,;:–—-")
+    return t or nom.strip()
+
+
+def _dmx(c: Canal, value: int) -> str:
+    """Valeur DMX GDTF. Un canal 16 bits donné à 128 est au centre exact (32768 sur 65535) :
+    écrit « 128/1 », un pan de 540° se retrouvait à 1,06° au lieu de 0."""
+    return "32768/2" if c.fine is not None and value == 128 else f"{value}/1"
 
 
 def _clean(name: str) -> str:
@@ -818,7 +845,7 @@ def construire(projet: Projet) -> FixtureType:
                 inside = f["from"] <= default <= last or f is initial
                 cf = ET.SubElement(lc, "ChannelFunction", {
                     "Name": f["name"], "Attribute": f["attr"], "OriginalAttribute": c.nom.strip(),
-                    "DMXFrom": f"{f['from']}/1", "Default": f"{default if inside else f['from']}/1",
+                    "DMXFrom": f"{f['from']}/1", "Default": _dmx(c, default) if inside else f"{f['from']}/1",
                 })
                 lo, hi = f["phys"]
                 index = bool(slots) and f["attr"] == c.attribut
@@ -838,7 +865,8 @@ def construire(projet: Projet) -> FixtureType:
                     cf.set("ModeTo", f"{plage.fin}/1")
                 select = bool(slots) and roue_de(f["attr"]) == wheel and "Select" in f["attr"]
                 for p in f["plages"]:
-                    cs_el = ET.SubElement(cf, "ChannelSet", {"Name": p.nom.strip(), "DMXFrom": f"{p.debut}/1"})
+                    label = nom_court(p.nom) if est_controle(c.attribut) else p.nom.strip()
+                    cs_el = ET.SubElement(cf, "ChannelSet", {"Name": label, "DMXFrom": f"{p.debut}/1"})
                     low = p.nom.strip().lower()
                     head = re.split(r"\s*,", low)[0]  # « Gobo 1, 360° slow → 10° fast »
                     split = [x.strip() for x in re.split(r"\s*(?:→|->|>)\s*", low)]

@@ -495,3 +495,21 @@ def test_gobos_dessines_reperes_par_des_numeros(tmp_path):
     assert w == h and im.getpixel((2, 2)) < 30 and im.getpixel((w // 2, h // 2 - 4)) > 220  # coins noirs, motif blanc
     small = Image.open(io.BytesIO(p.image("GoboWheel 1", "Gobo 1"))).convert("L")
     assert sum(1 for v in small.getdata() if v > 128) < sum(1 for v in im.getdata() if v > 128)  # le bon dessin
+
+
+def test_controle_sur_la_base_libelles_courts_et_pan_au_centre():
+    """Jo, 13/11/2026 : contrôles sur la géométrie Base, libellés de contrôle sans les précisions,
+    pan/tilt 16 bits par défaut au centre exact (80007F comme la console, pas 1,06°)."""
+    from ma3lib import ma3xml
+    mode = Mode("M", [Canal(1, 2, "Pan", "Pan", defaut=128, phys_de=-270, phys_a=270),
+                      Canal(3, None, "Dimmer", "Dimmer"),
+                      Canal(4, None, "Fixture control/settings", "Control1", plages=[
+                          Plage(0, 9, "No function (disables calibration) – 5 sec."),
+                          Plage(10, 14, "Linear dimming curve – 1 sec. (menu override, setting unaffected by power off/on)")]),
+                      Canal(5, None, "Reserved for future use", "NoFeature")])
+    out = ma3xml.convert(creation.construire(Projet("T", "C", "", [mode])))
+    chans = {ch.find("LogicalChannel").get("Attribute"): ch for ch in out.iter("DMXChannel")}
+    assert chans["Control1"].get("Geometry") == "Base" and chans["NoFeature"].get("Geometry") == "Base"
+    assert chans["Dimmer"].get("Geometry") == "Base.Yoke.Head"
+    assert [s.get("Name") for s in chans["Control1"].iter("ChannelSet")] == ["No function", "Linear dimming curve"]
+    assert chans["Pan"].find("LogicalChannel/ChannelFunction").get("Default") == "80007F"

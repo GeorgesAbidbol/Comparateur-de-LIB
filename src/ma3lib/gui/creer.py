@@ -27,7 +27,7 @@ R_FROM, R_TO, R_NAME, R_ATTR, R_PHYS0, R_PHYS1 = range(6)
 TIPS = {
     C_FINE: "Adresse de l'octet Fine (16 bits). Vide = canal 8 bits.",
     C_ATTR: "Attribut grandMA3. Proposé d'après le nom ; tape pour chercher.",
-    C_GEO: "Vide = Yoke pour le Pan, Head pour le reste. Donne un nom (Pixel, Tête…) pour une autre géométrie.",
+    C_GEO: "Vide = Yoke pour le Pan, Base pour les contrôles, Head pour le reste. Donne un nom (Pixel, Tête…) pour une autre géométrie.",
     C_COPIES: "Nombre d'instances identiques de cette géométrie (pixels, têtes…) : un modèle + N références,"
               " aux adresses qui se suivent. Saisis les canaux de la première seulement.",
     C_DEFAULT: "Valeur DMX par défaut (0 à 255).",
