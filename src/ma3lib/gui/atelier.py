@@ -19,7 +19,7 @@ from typing import Optional
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-                               QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QPushButton,
+                               QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
                                QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from .. import charte_dmx, compare, diagnostic, gdtf, geotree
@@ -862,18 +862,52 @@ class AtelierWindow(QMainWindow):
         self.modes.blockSignals(False)
         self.export_button.setEnabled(True)
         self.compare_button.setEnabled(True)
+        self.split_button.setEnabled(True)  # toujours cliquables : un refus s'explique (Jo, 13/11/2026)
+        self.strip_button.setEnabled(True)
         self._mode_changed()
 
     def split_per_mode(self) -> None:
         if not self.ft:
             return
         current = self.modes.currentText()
+        if not geotree.shared_trees(self.ft):
+            self._tell("Chaque mode a déjà sa propre base (ou aucun mode n'a plusieurs instances) : rien à séparer")
+            return
         if self._apply(geotree.split_per_mode):
-            self.modes.setCurrentText(current)
+            self._select_mode(current)
             self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
 
+    def _select_mode(self, name: str) -> None:
+        self.modes.blockSignals(True)
+        self.modes.clear()
+        self.modes.addItems([m.name for m in self.ft.modes])
+        self.modes.setCurrentText(name)
+        self.modes.blockSignals(False)
+
     def strip_3d(self) -> None:
-        if self.ft and self._apply(geotree.strip_3d):
+        if not self.ft:
+            return
+        current = self.modes.currentText()
+        mode = self.ft.mode(current)
+        hidden = geotree.hidden_3d(self.ft, mode) if mode else []
+        if hidden and geotree.shared_trees(self.ft):
+            names = ", ".join(g.name for g in hidden[:4]) + ("…" if len(hidden) > 4 else "")
+            ok = QMessageBox.question(
+                self, "Retirer la 3D",
+                f"Dans le mode « {current} », {len(hidden)} géométrie(s) n'ont aucun canal ({names}), "
+                "mais un autre mode les utilise : tous les modes partagent le même arbre.\n\n"
+                "Donner d'abord à chaque mode sa propre base, puis retirer la 3D ?\n"
+                "(Les adresses ne bougent pas, Ctrl+Z annule.)")
+            if ok != QMessageBox.Yes:
+                return
+            if self._apply(geotree.split_then_strip):
+                self._select_mode(current)
+                self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
+            return
+        if not geotree.channel_less(self.ft):
+            self._tell("Rien à retirer : toutes les géométries portent des canaux")
+            return
+        if self._apply(geotree.strip_3d):
             self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
 
     def export(self) -> None:
@@ -889,6 +923,7 @@ class AtelierWindow(QMainWindow):
             return
         mode = self.ft.mode(self.modes.currentText())
         root = self.ft.top_level(mode.geometry) if mode else None
+        self._diagnose()
         self.tree.set_root(root, self.useless, self.doubles, self._idents(), self.copies,
                            self._models(root))
         self._summary()
@@ -905,7 +940,11 @@ class AtelierWindow(QMainWindow):
 
     def _diagnose(self) -> None:
         # tout ce qui ne porte aucun canal, Beams compris (Jo, 10/11/2026 : la 3D ne l'intéresse pas)
+        # par mode : un arbre partagé garde des géométries sans canal dans ce mode
+        mode = self.ft.mode(self.modes.currentText()) if self.modes.count() else None
         self.useless = {g.name for g in geotree.channel_less(self.ft)}
+        if mode is not None:
+            self.useless |= {g.name for g in geotree.channel_less(self.ft, mode)}
         self.doubles = {n for grp in diagnostic.duplicate_templates(self.ft) for n in grp}
         self.copies = {n: len(g.names) for g in diagnostic.find_instance_groups(self.ft)
                        if not g.per_mode_variants for n in g.names}
@@ -927,13 +966,23 @@ class AtelierWindow(QMainWindow):
         self.status.setText(message)
         self.setWindowTitle(TITLE + (" •" if self.history else ""))
 
+    def _refuse(self, reason: str) -> None:
+        """Refus expliqué dans une fenêtre (Jo, 13/11/2026 : « pas de message quand ça refuse »)."""
+        self.status.setText(f"Impossible : {reason}")
+        QMessageBox.warning(self, "Impossible", reason[:1].upper() + reason[1:])
+
+    def _tell(self, text: str) -> None:
+        """Opération sans effet : on le dit aussi dans une fenêtre."""
+        self.status.setText(text)
+        QMessageBox.information(self, APP_NAME, text)
+
     def _apply(self, action, *args) -> bool:
         """Lance une opération de geotree, garde de quoi annuler, affiche le résultat."""
         before = geotree.snapshot(self.ft)
         try:
             result = action(self.ft, *args)
         except geotree.MoveError as exc:
-            self.status.setText(f"Impossible : {exc}")
+            self._refuse(str(exc))
             return False
         if isinstance(result, tuple):  # opérations qui relisent le fixture
             self.ft, message = result
@@ -1007,8 +1056,6 @@ class AtelierWindow(QMainWindow):
         n3d = len(names & self.useless)
         refs = {g.reference for g in root.walk() if g.is_reference} if root else set()
         ndbl = len((names | refs) & self.doubles)
-        self.strip_button.setEnabled(bool(self.useless))
-        self.split_button.setEnabled(bool(geotree.shared_trees(self.ft)))
         dot = lambda c: f"<span style='color:{c}; font-size:15px'>●</span>"
         self.summary.setText(
             f"Nettoyage proposé pour ce mode :  {dot(theme.TEXT_DIM.name())} {n3d} géométrie(s) 3D seule(s)"
@@ -1036,7 +1083,7 @@ class AtelierWindow(QMainWindow):
                 try:
                     free = [charte_dmx.libre(self.ft, mode, geo)]
                 except geotree.MoveError as exc:
-                    self.status.setText(f"Impossible : {exc}")
+                    self._refuse(str(exc))
                     return
                 dlg = ChannelDialog(f"Nouveau canal sur « {geo} »", known, "", free, "", self)
             else:
@@ -1047,7 +1094,7 @@ class AtelierWindow(QMainWindow):
                 return
             new, offsets, default = dlg.values()
             if offsets is None:
-                self.status.setText("Impossible : adresses illisibles (attendu 5 ou 5,6)")
+                self._refuse("adresses illisibles (attendu 5 ou 5,6)")
                 return
             if what == "add":
                 ok = self._apply(charte_dmx.ajouter, mode, geo, new, offsets)
@@ -1102,9 +1149,10 @@ class AtelierWindow(QMainWindow):
         except geotree.MoveError as exc:
             self.ft = geotree.restore(self.ft, before) if done else self.ft
             self._after_change(f"Impossible : {exc}")
+            self._refuse(str(exc))
             return
         if not done:
-            self.status.setText("Rien à changer")
+            self._tell("Rien à changer")
             return
         self.history.append(before)
         self._after_change("   ·   ".join(done) + "   ·   Ctrl+Z pour annuler")

@@ -1068,7 +1068,7 @@ def grid_proposal(g: Geometry, ft: Optional[FixtureType] = None) -> tuple[int, i
 # Supprimer la 3D seule (Jo, 10/11/2026 : « je m'en fiche de la 3D, ça fout le bazar
 # dans les lib, la compréhension des géométries et le patch des références »)
 
-def channel_less(ft: FixtureType) -> list[Geometry]:
+def channel_less(ft: FixtureType, mode=None) -> list[Geometry]:
     """Sommets des sous-arbres qui ne portent aucun canal, mode par mode : une référence
     n'est gardée que si son modèle porte des canaux dans un mode qui utilise cette référence
     (les 19 LED du mode Standard du Nando partent, celles de l'Extended Pixel restent).
@@ -1091,7 +1091,7 @@ def channel_less(ft: FixtureType) -> list[Geometry]:
         seen[id(g)] = useful
         return useful
 
-    for m in ft.modes:
+    for m in ([mode] if mode is not None else ft.modes):
         root = ft.top_level(m.geometry)
         if root is None:
             continue
@@ -1107,9 +1107,28 @@ def channel_less(ft: FixtureType) -> list[Geometry]:
         for c in g.children:
             visit(c)
 
+    if mode is not None:  # un seul mode : son arbre seulement (les modèles se jugent sur tous)
+        root = ft.top_level(mode.geometry)
+        for c in (root.children if root else []):
+            visit(c)
+        return out
     for top in ft.geometries:
         visit(top)
     return out
+
+
+def hidden_3d(ft: FixtureType, mode) -> list[Geometry]:
+    """Géométries sans canal dans `mode` que « Retirer la 3D » garde parce qu'un autre mode
+    les utilise (arbre partagé) : il faut d'abord donner sa base à chaque mode."""
+    gone = {id(g) for g in channel_less(ft)}
+    return [g for g in channel_less(ft, mode) if id(g) not in gone]
+
+
+def split_then_strip(ft: FixtureType) -> tuple[FixtureType, str]:
+    """Une base par mode, puis retirer la 3D : une seule opération (un seul Ctrl+Z)."""
+    ft, m1 = split_per_mode(ft)
+    ft, m2 = strip_3d(ft)
+    return ft, f"{m1} ; {m2}"
 
 
 def strip_3d(ft: FixtureType) -> tuple[FixtureType, str]:

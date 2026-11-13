@@ -525,3 +525,30 @@ def test_creer_image_d_emplacement_de_roue(tmp_path):
     page.ranges.selectRow(1)
     page.set_image(None)
     assert not page.projet.images
+
+
+def test_atelier_retirer_3d_propose_une_base_par_mode(tmp_path, _no_message_boxes):
+    """Aura XIP de Jo (13/11/2026) : arbre partagé, anneaux sans canal en Basic mais utilisés en
+    Extended -> « Retirer la 3D » propose de séparer les modes, et un refus s'affiche en fenêtre."""
+    from PySide6.QtWidgets import QApplication
+    from ma3lib.gui.atelier import AtelierWindow
+    from test_geotree import _ma3_wash
+
+    app = QApplication.instance() or QApplication([])
+    ft = _ma3_wash(tmp_path)
+    win = AtelierWindow()
+    win.load(str(ft.source), "Basic")
+    app.processEvents()
+    assert {"Ring 1", "Ring 2", "Ring 3"} <= win.useless  # sans canal dans ce mode
+    assert win.strip_button.isEnabled() and win.split_button.isEnabled()
+    win.strip_3d()
+    assert _no_message_boxes[-1][0] == "question"
+    assert [m.geometry for m in win.ft.modes] == ["Base Basic", "Base Extended"]
+    assert win.ft.geometry("Ring 1 Basic") is None and win.ft.geometry("Ring 1 Extended") is not None
+    win.split_per_mode()  # plus rien à séparer : on le dit
+    assert _no_message_boxes[-1][0] == "information"
+    win._apply(lambda ft: (_ for _ in ()).throw(__import__("ma3lib.geotree").geotree.MoveError("essai")))
+    assert _no_message_boxes[-1] == ("warning", "Essai") and "Impossible : essai" in win.status.text()
+    win.undo()
+    assert win.ft.mode("Basic").geometry == "Base"
+    win.close()
