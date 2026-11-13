@@ -647,17 +647,16 @@ def test_double_clic_montre_tous_les_canaux(tmp_path, monkeypatch):
     win.load(str(ft.source), "Extended")
     head = win.ft.geometry("Head")
     dlg = atelier.EditDialog(win.ft, head, "Extended", win,
-                             lambda: atelier.charte_dmx.lignes_arbre(win.ft, "Extended", win.ft.geometry("Head")),
+                             lambda: atelier.charte_dmx.lignes(win.ft, "Extended", win.ft.geometry("Head")),
                              win._edit_channel)
     texts = dlg.channel_texts()
-    assert len(texts) == 1 + 3 * 4 and texts[0].startswith("3") and "Tilt" in texts[0]
-    assert any("Ring 2" in t for t in texts)
-    # repatcher le rouge de Ring 2 (7 -> 20) depuis la fenêtre
+    # seulement les canaux de Head, pas ceux de ses enfants (Jo)
+    assert len(texts) == 1 and texts[0].startswith("3") and "Tilt" in texts[0]
     monkeypatch.setattr(atelier.ChannelDialog, "exec", lambda self: QDialog.Accepted)
-    monkeypatch.setattr(atelier.ChannelDialog, "values", lambda self: ("ColorRGB_R", [20], ""))
-    dlg._channel_asked("Ring 2", "ColorRGB_R")
-    rows = atelier.charte_dmx.lignes(win.ft, "Extended", win.ft.geometry("Ring 2"))
-    assert rows[0].offsets == [8] and any(r.attribute == "ColorRGB_R" and r.offsets == [20] for r in rows)
+    monkeypatch.setattr(atelier.ChannelDialog, "values", lambda self: ("Tilt", [20], ""))
+    dlg._channel_asked("Head", "Tilt")
+    rows = atelier.charte_dmx.lignes(win.ft, "Extended", win.ft.geometry("Head"))
+    assert [r.offsets for r in rows] == [[20]]
     assert any(t.startswith("20 ") for t in dlg.channel_texts())
     dlg.close()
     win.close()

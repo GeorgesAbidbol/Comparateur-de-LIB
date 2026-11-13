@@ -874,14 +874,14 @@ class EditDialog(QDialog):
                            + " — double-clic pour repatcher")
             title.setFont(theme.font(10, True))
             form.addRow(title)
-            self.channels = QTableWidget(0, 5)
-            self.channels.setHorizontalHeaderLabels(["Canal", "Attribut", "Géométrie", "Bits", "Défaut"])
+            self.channels = QTableWidget(0, 4)
+            self.channels.setHorizontalHeaderLabels(["Canal", "Attribut", "Bits", "Défaut"])
             self.channels.verticalHeader().setVisible(False)
             self.channels.setEditTriggers(QAbstractItemView.NoEditTriggers)
             self.channels.setSelectionBehavior(QAbstractItemView.SelectRows)
             self.channels.setSelectionMode(QAbstractItemView.SingleSelection)
             self.channels.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-            self.channels.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+            self.channels.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
             self.channels.setMinimumHeight(240)
             self.channels.itemDoubleClicked.connect(self._channel_clicked)
             form.addRow(self.channels)
@@ -909,18 +909,16 @@ class EditDialog(QDialog):
         rows = self._rows()
         self.channels.setRowCount(len(rows))
         for i, r in enumerate(rows):
-            cells = ["/".join(map(str, r.offsets)) if r.offsets else "virtuel", r.attribute, r.geometry,
+            cells = ["/".join(map(str, r.offsets)) if r.offsets else "virtuel", r.attribute,
                      str(r.bits), r.default]
             for j, text in enumerate(cells):
                 item = QTableWidgetItem(text)
                 item.setData(Qt.UserRole, (r.geometry, r.attribute))
-                if j == 2 and r.geometry == charte_dmx.carrier(self.g):
-                    item.setForeground(theme.ACCENT)  # les canaux de la géométrie elle-même
                 self.channels.setItem(i, j, item)
 
     def channel_texts(self) -> list[str]:
         """Lignes du tableau en texte (tests)."""
-        return ["  ".join(self.channels.item(i, j).text() for j in range(5))
+        return ["  ".join(self.channels.item(i, j).text() for j in range(4))
                 for i in range(self.channels.rowCount())]
 
     def _channel_clicked(self, item) -> None:
@@ -1566,7 +1564,7 @@ class AtelierWindow(QMainWindow):
     def _edit(self, g: Geometry) -> None:
         mode = self.modes.currentText()
         name = g.name
-        rows = lambda: charte_dmx.lignes_arbre(self.ft, mode, self.ft.geometry(name) or g)
+        rows = lambda: charte_dmx.lignes(self.ft, mode, self.ft.geometry(name) or g)
         dlg = EditDialog(self.ft, g, mode, self, rows, self._edit_channel)
         if dlg.exec() == QDialog.Accepted:
             edit = dlg.edit()

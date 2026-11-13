@@ -98,16 +98,6 @@ def lignes(ft: FixtureType, mode_name: str, g: Geometry) -> list[Ligne]:
     return sorted(out, key=lambda l: (not l.offsets, l.offsets[:1]))
 
 
-def lignes_arbre(ft: FixtureType, mode_name: str, g: Geometry) -> list[Ligne]:
-    """Tous les canaux contenus dans la géométrie : les siens et ceux de ses enfants (pour une
-    référence, ceux de son modèle), dans l'ordre des adresses, virtuels à la fin."""
-    top = ft.top_level(g.reference) if g.is_reference else g
-    out: list[Ligne] = []
-    for x in (top.walk() if top is not None else []):
-        out += lignes(ft, mode_name, x) if not x.is_reference else []
-    return sorted(out, key=lambda l: (not l.offsets, l.offsets[:1]))
-
-
 def _space(ft: FixtureType, geo: str) -> set[str]:
     """Géométries qui partagent le même espace d'adresses : tout l'arbre (ou le modèle) de `geo`."""
     g = ft.geometry(geo)
