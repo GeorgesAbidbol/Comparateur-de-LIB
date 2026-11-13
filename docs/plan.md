@@ -56,7 +56,7 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
    Images des roues (`pdfimages.py`) : sur les pages « gobo / colour wheel », les images sont
    rattachées aux emplacements par le texte voisin, sinon dans l'ordre ; elles vivent dans le projet
    (`Projet.images`), l'archive GDTF (`wheels/`) et l'export MA3 (contenu intégré dans `GoboImage`,
-   À VÉRIFIER dans onPC : les exports de la console ne portent que la référence au pool).
+   vérifié dans onPC par Jo le 13/11/2026 ; les exports de la console ne portent que la référence au pool).
    Dans « Créer » : boutons « Image… », « Inverser », « Retirer l'image » sur une plage de roue.
    Reste : notices sans tableau tracé (texte seul), gobos dessinés en traits (vectoriels),
    fréquences de strobe quand la notice ne les donne pas, gélatines par catégorie (Muse : 11 tableaux), poids / puissance,
