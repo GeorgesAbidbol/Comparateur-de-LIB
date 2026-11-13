@@ -58,6 +58,14 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
    (`Projet.images`), l'archive GDTF (`wheels/`) et l'export MA3 (contenu intégré dans `GoboImage`,
    vérifié dans onPC par Jo le 13/11/2026 ; les exports de la console ne portent que la référence au pool).
    Dans « Créer » : boutons « Image… », « Inverser », « Retirer l'image » sur une plage de roue.
+   Chartes « empilées » (Martin, testé sur le MAC Viper Profile, 13/11/2026) : `pdfchart.lire_piles` lit
+   les tableaux à une case par canal (valeurs et libellés empilés, alignés par leur hauteur ; valeurs
+   16 bits ramenées à l'octet fort ; tableau de suite sur la page suivante). Canal d'index/rotation
+   piloté par plusieurs suites de plages du canal de sélection (`creation._maitres`). Noms des filtres
+   et des gobos repris de la notice (`nommer_emplacements`). Gobos dessinés en traits et repérés par
+   une rangée de numéros : rendus en image, papier remis en noir (`pdfimages._figures`).
+   Physique lue dans le texte : points de conduite (« Pan . . . 540° »), strobe « 2 Hz to 10 Hz »,
+   zoom « Flood → spot », CTO « 6000 K → 3200 K ».
    Reste : notices sans tableau tracé (texte seul), gobos dessinés en traits (vectoriels),
    fréquences de strobe quand la notice ne les donne pas, gélatines par catégorie (Muse : 11 tableaux), poids / puissance,
    test d'import onPC.

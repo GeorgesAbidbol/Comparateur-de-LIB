@@ -366,3 +366,132 @@ def test_physique_tiree_du_texte_de_la_notice():
     assert got["Zoom"] == (50, 4.5)
     assert got["Blade1Rot"] == (-25, 25) and got["ShaperRot"] == (-60, 60)
     assert got["Blade2Rot"] == (None, None)  # la charte donne déjà ses degrés
+
+
+# ------------------------------------------------- chartes « empilées » (format Martin)
+
+def _pile_viper():
+    from ma3lib.pdfchart import Bloc, Ligne, Pile
+
+    def bloc(chans, name, lines, default="0"):
+        out, y = [Ligne("", name, "gras", 0, 9)], 12.0
+        for val, text, style in lines:
+            if style == "ital":
+                y += 6  # un titre de section est détaché de ce qui précède
+            out.append(Ligne(val, text, style, y, y + 9))
+            y += 11
+        return Bloc(chans, out, default)
+
+    gobo = [("", "Indexed gobo: set indexed angle on channels 9/10 (16-bit) or 10/11", "ital"),
+            ("0 - 9", "Open", ""), ("10 - 14", "Gobo 1", ""), ("15 - 19", "Gobo 2", ""),
+            ("", "Continuous gobo rotation: set gobo rotation speed on channels 9/10", "ital"),
+            ("35 - 39", "Gobo 1", ""), ("40 - 44", "Gobo 2", ""),
+            ("", "Gobo shake centered on indexed position: set indexed angle", "ital"),
+            ("60 - 89", "Gobo 1, 360° slow → 10° fast", ""), ("90 - 119", "Gobo 2, 360° slow → 10° fast", ""),
+            ("", "Continuous gobo wheel scroll with continuous gobo rotation: set speed", "ital"),
+            ("210 - 232", "CW gobo wheel scroll, fast → slow", ""), ("233 - 255", "CCW gobo wheel scroll, slow → fast", "")]
+    pos = [("", "If indexed gobo is selected on channel 8 (16-bit) or 9 (16-bit ext.)", "ital"),
+           ("0 - 65535", "Gobo indexing, 0° → maximum", ""),
+           ("", "If continuous gobo rotation is selected on channel 8 (16-bit) or 9", "ital"),
+           ("0 - 600", "No gobo rotation, gobo indexed at 0°", ""), ("601 - 32130", "CW, fast → slow", ""),
+           ("32131 - 32895", "No gobo rotation, gobo stops at current position", ""),
+           ("32896 - 64515", "CCW, slow → fast", ""), ("64516 - 65535", "No gobo rotation, gobo indexed at 90°", "")]
+    return Pile(["Basic 16-bit Mode", "16-bit Extended Mode"], [
+        bloc([[1], [1]], "Strobe/shutter", [("0 - 19", "Shutter closed (Lamp switches to 800 watt mode", ""),
+                                            ("", "for 10 seconds)", ""), ("20 - 49", "Shutter open", ""),
+                                            ("50 - 200", "Strobe, slow → fast", "")], "30"),
+        bloc([[2], [2]], "Dimmer fade (MSB)", [("0 - 65535", "Closed → open", "")]),
+        bloc([[], [3]], "Dimmer fade, fine (LSB)", []),
+        bloc([[3], [4]], "CTO", [("0 - 255", "Open (6000 K) → warm (3200 K)", "")]),
+        bloc([[4], [5]], "Breakup wheel (wheel 1): gobo selection, indexing, shake, rotation", gobo),
+        bloc([[5, 6], [6, 7]], "Breakup wheel (wheel 1): gobo indexing, rotation (16-bit fine, MSB and LSB)", pos, "32768"),
+        bloc([[7], [8, 9]], "Zoom, 16-bit (MSB and LSB)", [("0 - 65535", "Flood → spot", "")], "32768"),
+        bloc([[8, 9], [10, 11]], "Pan, 16-bit (MSB and LSB)", [("0 - 65535", "Left → right (32768 = neutral)", "")], "32768"),
+        bloc([[], [12]], "Reserved for future use", []), bloc([[], [13]], "Reserved for future use", []),
+    ])
+
+
+def test_charte_empilee_format_martin():
+    basic, ext = pdfchart.lire_piles([_pile_viper()])
+    assert (basic.nom, basic.empreinte, ext.nom, ext.empreinte) == ("Basic 16-bit Mode", 9, "16-bit Extended Mode", 13)
+    by = {c.attribut: c for c in ext.canaux}
+    assert by["Dimmer"].adresses == [2, 3] and basic.canaux[1].adresses == [2]  # Fine dans le mode étendu seulement
+    assert by["Zoom"].adresses == [8, 9] and by["Zoom"].nom == "Zoom" and by["Zoom"].defaut == 128
+    assert by["Shutter1"].defaut == 30
+    assert by["Shutter1"].plages[0].nom.endswith("for 10 seconds)")  # libellé sur deux lignes
+    assert by["CTO"].phys_de == 6000 and by["CTO"].phys_a == 3200
+    gobo = by["Gobo1"]
+    assert [p.attribut for p in gobo.plages] == ["Gobo1"] * 3 + ["Gobo1SelectSpin"] * 2 + ["Gobo1SelectShake"] * 2 \
+        + ["Gobo1WheelSpin"] * 2
+    assert gobo.plages[0].groupe == "Indexed gobo" and gobo.plages[5].phys_de is None  # « 360° slow » n'est pas une course
+    pos = by["Gobo1Pos"]
+    assert pos.adresses == [6, 7] and pos.defaut == 128
+    assert [(p.debut, p.fin) for p in pos.plages] == [(0, 255), (0, 2), (3, 125), (126, 128), (129, 252), (253, 255)]
+    assert [c.attribut for c in ext.canaux[-2:]] == ["NoFeature", "NoFeature2"]
+
+
+def test_charte_empilee_maitre_en_plusieurs_suites():
+    """Gobo1Pos se lit en index ou en rotation selon les plages de Gobo1 ; elles forment plusieurs suites."""
+    projet = Projet("Martin", "Viper", "", pdfchart.lire_piles([_pile_viper()]))
+    ft = creation.construire(projet)
+    ext = ft.xml_root.findall(".//DMXMode")[1]
+    fns = [f for ch in ext.iter("DMXChannel") for f in ch.iter("ChannelFunction")
+           if ch.find("LogicalChannel").get("Attribute") == "Gobo1Pos"]
+    index = [(f.get("ModeFrom"), f.get("ModeTo")) for f in fns if f.get("Name").startswith("Gobo indexing")]
+    assert index == [("0/1", "19/1"), ("60/1", "119/1")]  # sélection indexée, puis shake centré sur l'index
+    spin = {(f.get("ModeFrom"), f.get("ModeTo")) for f in fns if f.get("Attribute") == "Gobo1PosRotate"}
+    assert spin == {("35/1", "44/1"), ("210/1", "255/1")}
+    assert all(f.get("ModeMaster") == "Head_Gobo1" for f in fns)
+    sets = [s for ch in ext.iter("DMXChannel") for f in ch.iter("ChannelFunction") if f.get("Attribute") == "Gobo1SelectShake"
+            for s in f]
+    assert [s.get("WheelSlotIndex") for s in sets] == ["2", "3"]  # « Gobo 1, 360° slow → 10° fast » -> emplacement Gobo 1
+
+
+def test_noms_d_emplacements_et_physique_de_la_notice():
+    projet = Projet("Martin", "Viper", "", pdfchart.lire_piles([_pile_viper()]))
+    projet.definir_image("GoboWheel 1", "Gobo 2", _PNG)
+    text = ("Breakup wheel (wheel 1)\n1. Dots in space ................... P/N 43092005\n"
+            "2. Happy .............................. P/N 43092006\n"
+            "Zoom . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .10° - 44°\n"
+            "Pan. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 540°\n"
+            "random strobe and pulse effects with variable speed from approx. 2 Hz to 10 Hz.")
+    assert pdfchart.nommer_emplacements(projet, text) == 2
+    assert creation.roues(projet)["GoboWheel 1"] == ["Open", "Dots in space", "Happy"]
+    assert projet.image("GoboWheel 1", "Happy") == _PNG and not projet.image("GoboWheel 1", "Gobo 2")
+    pdfchart.appliquer_faits(projet, text)
+    by = {c.attribut: c for c in projet.modes[1].canaux}
+    assert (by["Zoom"].phys_de, by["Zoom"].phys_a) == (44, 10)  # « Flood → spot » : du large au serré
+    assert (by["Pan"].phys_de, by["Pan"].phys_a) == (-270, 270)
+    strobe = next(p for p in by["Shutter1"].plages if p.attribut == "Shutter1Strobe")
+    assert (strobe.phys_de, strobe.phys_a) == (2, 10)
+
+
+def test_gobos_dessines_reperes_par_des_numeros(tmp_path):
+    pytest.importorskip("pdfplumber")
+    rl = pytest.importorskip("reportlab.pdfgen.canvas")
+    import io
+    from PIL import Image
+    from ma3lib import pdfimages
+    c = rl.Canvas(str(tmp_path / "g.pdf"), pagesize=(595, 842))
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(86, 620, "Breakup wheel")
+    for k in range(5):  # disque noir, motif blanc, numéro dessous : comme la notice du MAC Viper
+        cx = 145 + k * 77
+        c.setFillColorRGB(0, 0, 0)
+        c.circle(cx, 560, 34, stroke=0, fill=1)
+        c.setFillColorRGB(1, 1, 1)
+        c.rect(cx - 5 - 3 * k, 555, 10 + 6 * k, 10, stroke=0, fill=1)
+        c.setFillColorRGB(0, 0, 0)
+        c.drawCentredString(cx, 510, str(k + 1))
+    c.save()
+    p = Projet("T", "G", "", [Mode("M", [
+        Canal(1, nom="Breakup wheel (wheel 1): gobo selection", attribut="Gobo1",
+              plages=[Plage(0, 9, "Open")] + [Plage(10 + 5 * k, 14 + 5 * k, f"Gobo {k + 1}") for k in range(5)]),
+        Canal(2, nom="Aerial wheel (wheel 2): gobo selection", attribut="Gobo2",
+              plages=[Plage(0, 9, "Open")] + [Plage(10 + 5 * k, 14 + 5 * k, f"Gobo {k + 1}") for k in range(5)])])])
+    assert pdfimages.images_des_roues(tmp_path / "g.pdf", p) == 5 and not p.image("GoboWheel 2", "Gobo 1")
+    im = Image.open(io.BytesIO(p.image("GoboWheel 1", "Gobo 5"))).convert("L")
+    w, h = im.size
+    assert w == h and im.getpixel((2, 2)) < 30 and im.getpixel((w // 2, h // 2 - 4)) > 220  # coins noirs, motif blanc
+    small = Image.open(io.BytesIO(p.image("GoboWheel 1", "Gobo 1"))).convert("L")
+    assert sum(1 for v in small.getdata() if v > 128) < sum(1 for v in im.getdata() if v > 128)  # le bon dessin

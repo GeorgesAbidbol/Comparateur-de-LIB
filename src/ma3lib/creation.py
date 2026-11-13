@@ -150,6 +150,10 @@ _RULES: list[tuple[str, str]] = [
     (r"(frame|shaper|blade|framing)s?.*rot", "ShaperRot"),
     (r"(ovali[sz]er|beam ?shaper).*(index|rot)", "BeamShaperPos"),
     (r"ovali[sz]er|beam ?shaper", "BeamShaper"),
+    (r"animation.*speed", ""),  # vitesse des mouvements d'animation : pas d'attribut standard
+    (r"\bfx wheel|animation wheel|effects? wheel", "AnimationWheel1"),
+    (r"wheel (\d)\b.*selection", r"Gobo\1"),  # « Breakup wheel (wheel 1): gobo selection, indexing, shake… »
+    (r"wheel (\d)\b.*(index|rot)", r"Gobo\1Pos"),
     (r"gobo\s*(\d)?.*(index|rot)", r"Gobo\1Pos"),
     (r"gobo\s*(\d)?", r"Gobo\1"),
     (r"prism\s*(\d)?.*(index|rot)", r"Prism\1Pos"),
@@ -252,7 +256,7 @@ def attribuer(mode: Mode, force: bool = False) -> None:
         used = pris.setdefault(c.geometrie, set())
         if attr in used:
             # famille numérotée (ColorMacro1, Control1…) : le suivant ; sinon un attribut maison
-            numbered = bool(re.search(r"\d$", attr))
+            numbered = bool(re.search(r"\d$", attr)) or attr == "NoFeature"
             attr = _suivant(attr, used) if numbered or nom_maison(c.nom) in used else nom_maison(c.nom)
         used.add(attr)
         c.attribut = attr
@@ -286,6 +290,11 @@ def physique(texte: str, attribut: str = "") -> Optional[tuple[float, float]]:
     « Swivelling from -25° towards 0° » -> (-25, 0) ; « 2.200K to 15.000K » -> (2200, 15000) ;
     « 0 – 100% » -> (0, 1) ; « Open » sur un shutter -> (1, 1)."""
     t = re.sub(r"degrees?|\bdeg\b", "°", texte.replace("–", "-").replace("—", "-"), flags=re.I)
+    if re.search(r"°", t) and re.search(r"\bslow\b|\bfast\b|maximum|\bmax\b", t, re.I):
+        return None  # « 360° slow → 10° fast » (amplitude d'un shake), « 0° → maximum » : pas une course connue
+    kelvins = re.findall(r"(\d{4,5})\s*K\b", t)
+    if len(kelvins) == 2:  # « Open (6000 K) → warm (3200 K) »
+        return float(kelvins[0]), float(kelvins[1])
     if (m := _PAIR.search(t)):
         unit = m.group(4)
         return _value(m.group(1), m.group(2) or unit), _value(m.group(3), unit)
@@ -294,7 +303,7 @@ def physique(texte: str, attribut: str = "") -> Optional[tuple[float, float]]:
         return v, v
     if attribut.startswith("CIE_") and (m := _PLAIN_PAIR.search(t)):
         return float(m.group(1)), float(m.group(2))
-    low = t.lower()
+    low = re.sub(r"\s*(?:→|->|>)\s*", " to ", t.lower())
     if re.match(r"^Shutter\d+$", attribut):
         if re.search(r"\bopen\b|led on|\bon\b", low):
             return 1.0, 1.0
@@ -336,8 +345,15 @@ def sous_attribut(attribut: str, texte: str) -> str:
             return "IrisStrobeRandom" if rnd else "IrisStrobe"
     elif (m := re.match(r"^(Color|Gobo|AnimationWheel)(\d+)$", attribut)):
         fam, n = m.groups()
+        speed = bool(re.search(r"slow|fast|speed|\bcw\b|\bccw\b|forward|backward|rainbow", t))
         if "shake" in t and fam == "Gobo":
             return f"Gobo{n}SelectShake"
+        if fam == "AnimationWheel" and re.search(r"movement|macro", t):
+            return f"AnimationWheel{n}Macro"
+        if fam == "Gobo" and "gobo rotation" in t and not re.search(r"wheel (scroll|rotat|spin)", t):
+            return f"Gobo{n}SelectSpin"  # le gobo choisi tourne sur lui-même
+        if spin and not speed and not stop and re.search(r"scroll", t) and not re.search(r"rotat|spin|rainbow", t):
+            return attribut  # « Continuous scroll : Open → Slot 1 » : des positions de la roue, pas une vitesse
         if "random" in t:
             return f"{fam}{n}WheelRandom" if fam != "AnimationWheel" else f"{fam}{n}Random"
         if "audio" in t or "sound" in t or "music" in t:
@@ -347,7 +363,8 @@ def sous_attribut(attribut: str, texte: str) -> str:
     elif re.match(r"^(Gobo\d+|Prism\d+|BeamShaper|AnimationWheel\d+)Pos$", attribut):
         if (spin and re.search(r"slow|fast|speed|forward|backward|\bcw\b|\bccw\b", t)) or (stop and "index" not in t):
             return attribut + "Rotate"
-    elif (m := re.match(r"^Prism(\d+)$", attribut)) and spin and "index" not in t:
+    elif (m := re.match(r"^Prism(\d+)$", attribut)) and spin and "index" not in t \
+            and not re.search(r"\bset\b|\bon ch|next ch", t):  # « set speed on ch. 18 » : un autre canal règle la rotation
         return f"Prism{m.group(1)}PosRotate"
     return attribut
 
@@ -471,6 +488,7 @@ COULEURS = {
     "cyan": "00ffff", "yellow": "ffe600", "orange": "ff8000", "amber": "ffbf00", "lavender": "b57edc",
     "purple": "800080", "violet": "7f00ff", "uv": "4b0082", "cto": "ffd9a0", "ctb": "cfe4ff",
     "lime": "bfff00", "turquoise": "40e0d0", "aqua": "00c8c8", "minus green": "ffb0ff",
+    "1/2 minus green": "ffd8ff", "half minus green": "ffd8ff",
 }
 
 
@@ -502,7 +520,7 @@ def couleur_emplacement(nom: str) -> str:
 
 _WHEEL = re.compile(r"^(Color|Gobo|AnimationWheel|Prism)(\d+)")
 _WHEEL_NAMES = {"Color": "ColorWheel", "Gobo": "GoboWheel", "AnimationWheel": "AnimationWheel", "Prism": "PrismWheel"}
-_NOT_SLOT = re.compile(r"\+|&|\bto\b|→|>|rotat|spin|rainbow|shake|index|no function|reserved", re.I)
+_NOT_SLOT = re.compile(r"\+|&|\bto\b|→|>|rotat|spin|rainbow|shake|index|no function|reserved|\bstops?\b", re.I)
 
 
 def roue_de(attribut: str) -> str:
@@ -577,6 +595,37 @@ def _maitre(mode: Mode, c: Canal, alt: list[Plage]) -> Optional[tuple[Canal, Pla
     return None
 
 
+def _genre(texte: str) -> str:
+    """« rot » (rotation continue) ou « index » : ce que choisit une plage d'un canal maître."""
+    t = texte.lower()
+    if "index" in t:
+        return "index"
+    return "rot" if re.search(r"rotat|spin", t) else ""
+
+
+def _maitres(mode: Mode, c: Canal, alt: list[Plage]) -> list[tuple[Canal, Plage]]:
+    """Plages du canal maître qui choisissent cette lecture. Soit une plage du même titre (`_maitre`),
+    soit, pour un canal d'index/rotation (Gobo1Pos, Prism1Pos), les plages du canal de sélection
+    (Gobo1, Prism1) du même genre : « If indexed gobo is selected on channel 8 » -> ses plages
+    d'indexation ; elles peuvent former plusieurs suites (0-34 et 60-209)."""
+    kind = _genre(alt[0].groupe or "")
+    base = re.sub(r"Pos(Rotate)?$", "", c.attribut)
+    other = next((o for o in mode.canaux if o is not c and o.attribut == base), None)
+    if not kind or other is None or base == c.attribut:
+        one = _maitre(mode, c, alt)
+        return [one] if one is not None else []
+    out: list[tuple[Canal, Plage]] = []
+    last_ok = False
+    for p in other.plages:
+        ok = _genre(f"{p.groupe} {p.nom}") == kind
+        if ok and last_ok and out[-1][1].fin + 1 >= p.debut > out[-1][1].debut:
+            out[-1][1].fin = p.fin
+        elif ok:
+            out.append((other, Plage(p.debut, p.fin, p.groupe or p.nom)))
+        last_ok = ok
+    return out
+
+
 def _fonctions(mode: Mode, c: Canal, notes: list[str]) -> list[dict]:
     """Découpe un canal en fonctions GDTF : une par suite de plages de même fonction et de même section."""
     alts = _alternatives(c)
@@ -584,12 +633,13 @@ def _fonctions(mode: Mode, c: Canal, notes: list[str]) -> list[dict]:
     if not alts:
         return [{"attr": c.attribut, "name": (c.nom or c.attribut).strip(), "from": 0, "plages": [],
                  "phys": (c.phys_de, c.phys_a), "master": None}]
-    masters = [_maitre(mode, c, alt) if len(alts) > 1 else None for alt in alts]
-    if len(alts) > 1 and not any(masters):
+    found = [_maitres(mode, c, alt) if len(alts) > 1 else [] for alt in alts]
+    if len(alts) > 1 and not any(found):
         notes.append(f"{mode.nom}, canal {c.adresse} « {c.nom} » : plusieurs lectures du même canal sans canal "
                      f"maître trouvé, seule la première est gardée.")
-        alts, masters = alts[:1], [None]
-    for alt, master in zip(alts, masters):
+        alts, found = alts[:1], [[]]
+    pairs = [(alt, m) for alt, ms in zip(alts, found) for m in (ms or [None])]  # une fonction par suite du maître
+    for alt, master in pairs:
         if len(alts) > 1 and master is None and alt is not alts[0]:
             notes.append(f"{mode.nom}, canal {c.adresse} « {c.nom} » : section « {alt[0].groupe or alt[0].nom} » "
                          f"ignorée (pas de canal maître trouvé).")
@@ -786,10 +836,21 @@ def construire(projet: Projet) -> FixtureType:
                     cf.set("ModeMaster", f"{geo_of[id(master)]}_{master.attribut}")
                     cf.set("ModeFrom", f"{plage.debut}/1")
                     cf.set("ModeTo", f"{plage.fin}/1")
+                select = bool(slots) and roue_de(f["attr"]) == wheel and "Select" in f["attr"]
                 for p in f["plages"]:
                     cs_el = ET.SubElement(cf, "ChannelSet", {"Name": p.nom.strip(), "DMXFrom": f"{p.debut}/1"})
-                    if index and p.nom.strip().lower() in slots:
-                        cs_el.set("WheelSlotIndex", str(slots.index(p.nom.strip().lower()) + 1))
+                    low = p.nom.strip().lower()
+                    head = re.split(r"\s*,", low)[0]  # « Gobo 1, 360° slow → 10° fast »
+                    split = [x.strip() for x in re.split(r"\s*(?:→|->|>)\s*", low)]
+                    if index and low in slots:
+                        cs_el.set("WheelSlotIndex", str(slots.index(low) + 1))
+                    elif index and len(split) == 2 and all(x in slots for x in split):
+                        # entre deux emplacements : du centre du premier (0) au centre du suivant (1)
+                        cs_el.set("WheelSlotIndex", str(slots.index(split[0]) + 1))
+                        cs_el.set("PhysicalFrom", "0")
+                        cs_el.set("PhysicalTo", "1")
+                    elif select and head in slots:
+                        cs_el.set("WheelSlotIndex", str(slots.index(head) + 1))
                     elif p.phys_de is not None and p.phys_a is not None and not index:
                         cs_el.set("PhysicalFrom", _num(p.phys_de))
                         cs_el.set("PhysicalTo", _num(p.phys_a))
