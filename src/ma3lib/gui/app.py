@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel, QMainWindow,
                                QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
@@ -56,6 +56,12 @@ class AppWindow(QMainWindow):
         nav = QHBoxLayout(navbar)
         nav.setContentsMargins(16, 0, 16, 0)
         nav.setSpacing(4)
+        logo_file = Path(__file__).resolve().parent.parent / "data" / "banane-logo.png"
+        if logo_file.exists():  # le logo de Jo, dans la barre de l'appli
+            logo = QLabel()
+            logo.setPixmap(QPixmap(str(logo_file)).scaledToHeight(30, Qt.SmoothTransformation))
+            nav.addWidget(logo)
+            nav.addSpacing(6)
         name = QLabel(APP_NAME)
         name.setFont(theme.font(11, True))
         nav.addWidget(name)
