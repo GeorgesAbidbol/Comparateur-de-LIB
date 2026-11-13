@@ -582,7 +582,7 @@ class Params(QWidget):
         self.address.setVisible(b is not None)  # sans adresse propre : seulement l'explication
         self.address.setValue(b.dmx_offset if b else 1)
         self.brk.setText(f"Break {b.dmx_break}" if b else ("sans adresse" if g.is_reference else
-                                                           "pas d'adresse propre : voir ses canaux"))
+                                                           "patch dans DMX mode"))
         self.brk.setToolTip("" if b else "Seule une référence a sa propre adresse (son Break). Une géométrie "
                             "n'en a pas : ce sont ses canaux qui ont des numéros dans le mode. Pour les décaler, "
                             "double-clic sur la ligne : « premier canal ».")
