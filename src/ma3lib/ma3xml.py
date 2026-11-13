@@ -641,6 +641,9 @@ def _channel_function(ctx: _Ctx, cf: ET.Element, parent: ET.Element, virtual: bo
         v = dmx_value(cs.get("DMXFrom"))
         if v != "000000":
             sa["DMXFrom"] = v
+        wsi = cs.get("WheelSlotIndex")
+        if wsi not in (None, "0", "-2147483648"):
+            sa["WheelSlotIndex"] = wsi
         if cs.get("PhysicalFrom") is not None or cs.get("PhysicalTo") is not None:
             cpf, cpt = _num(cs.get("PhysicalFrom"), 0.0) * scale, _num(cs.get("PhysicalTo"), 1.0) * scale
             if cpf != 0.0:
@@ -648,9 +651,12 @@ def _channel_function(ctx: _Ctx, cf: ET.Element, parent: ET.Element, virtual: bo
             if cpt != 1.0:
                 sa["PhysicalTo"] = _f(str(cpt), 4)
             sa["HasPhysical"] = "Yes"
-        wsi = cs.get("WheelSlotIndex")
-        if wsi not in (None, "0", "-2147483648"):
-            sa["WheelSlotIndex"] = wsi
+        elif "WheelSlotIndex" in sa and cf.get("Wheel") and unit in ("", "None"):
+            # emplacement fixe, comme dans les exports de la console (Esprite) : physique 0 à 0, relative au
+            # centre de l'emplacement. Sans elle, onPC 2.3.2.0 déduit l'emplacement en répartissant la plage
+            # DMX de la fonction et l'image affichée est décalée (Jo, 13/11/2026).
+            sa["PhysicalTo"] = "0.0000"
+            sa["HasPhysical"] = "Yes"
         _el(e, "ChannelSet", sa)
     for sub in cf:
         if sub.tag != "ChannelSet":

@@ -335,3 +335,16 @@ def test_images_de_gobos_lues_dans_un_pdf(tmp_path):
     import io
     red = Image.open(io.BytesIO(p.image("GoboWheel 1", "Gobo 6"))).convert("RGB").getpixel((5, 5))[0]
     assert red < 20 and p.image("GoboWheel 2", "Bars") and not p.image("GoboWheel 1", "Open")
+
+
+def test_emplacements_de_roue_physique_fixe_dans_l_export():
+    """Comme la console : chaque ChannelSet d'index de roue a une physique 0 à 0 (centre de l'emplacement),
+    sinon onPC déduit l'emplacement de la plage DMX et l'image est décalée."""
+    from ma3lib import ma3xml
+    out = ma3xml.convert(creation.construire(_projet_gobos()))
+    cf = next(f for f in out.iter("ChannelFunction") if f.get("Attribute") == "Gobo1")
+    sets = cf.findall("ChannelSet")
+    assert [s.get("WheelSlotIndex") for s in sets] == [str(i) for i in range(1, 8)]
+    assert all(s.get("HasPhysical") == "Yes" and s.get("PhysicalTo") == "0.0000" and s.get("PhysicalFrom") is None
+               for s in sets)
+    assert list(sets[1].attrib) == ["Name", "DMXFrom", "WheelSlotIndex", "PhysicalTo", "HasPhysical"]
