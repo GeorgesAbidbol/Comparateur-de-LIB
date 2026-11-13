@@ -409,7 +409,7 @@ def _pages_probables(path: Path) -> tuple[Optional[set[int]], str]:
 
 
 _DEG = r"(\d+(?:[.,]\d+)?)\s*°"
-_SEP = r"\s*(?:-|–|to|/)\s*"
+_SEP = r"\s*(?:-|–|~|to|/)\s*"
 
 
 def appliquer_faits(projet: Projet, text: str) -> None:
@@ -419,14 +419,25 @@ def appliquer_faits(projet: Projet, text: str) -> None:
         m = re.search(pattern, text, re.I)
         return tuple(float(g.replace(",", ".")) for g in m.groups() if g) if m else None
 
-    spans = {"Pan": find(r"\bpan\b[^\n\d°]{0,40}?" + r"(\d{3})\s*°"),
-             "Tilt": find(r"\btilt\b[^\n\d°]{0,40}?" + r"(\d{3})\s*°")}
+    # « Pan movement range: 540° », « Pan 0-540° », « Tilt: 270° »
+    course = r"[^\n\d°]{0,40}?(?:0\s*°?" + _SEP + r")?(\d{3})\s*°"
+    spans = {"Pan": find(r"\bpan\b" + course), "Tilt": find(r"\btilt\b" + course)}
+    # « blade angle adjustment of min. ±25° », « module rotation of min. ±60° », « Frame rotation ±45° »
+    pm = r"[^\n\d±]{0,40}?(?:±|\+/-|\+-)\s*(\d+(?:[.,]\d+)?)\s*°"
+    blade = find(r"blades?\b[^\n]{0,25}?(?:angle|swivel|tilt)" + pm)
+    frame = find(r"(?:module|frame|framing system|shutter system)\s+rotation" + pm)
     zoom = find(_DEG + _SEP + _DEG + r"[^\n]{0,12}zoom") or find(r"zoom[^\n\d]{0,30}" + _DEG + _SEP + _DEG)
     for mode in projet.modes:
         for c in mode.canaux:
-            if c.plages or (c.phys_de is not None and (c.attribut != "Zoom" or {c.phys_de, c.phys_a} != {0.0, 1.0})):
+            if len(c.plages) > 1 or any(p.phys_de is not None for p in c.plages):
+                continue  # la charte donne déjà la physique plage par plage
+            if c.phys_de is not None and (c.attribut != "Zoom" or {c.phys_de, c.phys_a} != {0.0, 1.0}):
                 continue
-            if spans.get(c.attribut):
+            angle = (blade if re.fullmatch(r"Blade\d+Rot", c.attribut) else frame if c.attribut == "ShaperRot"
+                     else None)
+            if angle:
+                c.phys_de, c.phys_a = -angle[0], angle[0]
+            elif spans.get(c.attribut):
                 half = spans[c.attribut][0] / 2
                 c.phys_de, c.phys_a = -half, half
             elif c.attribut == "Zoom" and zoom and len(zoom) == 2:

@@ -348,3 +348,21 @@ def test_emplacements_de_roue_physique_fixe_dans_l_export():
     assert all(s.get("HasPhysical") == "Yes" and s.get("PhysicalTo") == "0.0000" and s.get("PhysicalFrom") is None
                for s in sets)
     assert list(sets[1].attrib) == ["Name", "DMXFrom", "WheelSlotIndex", "PhysicalTo", "HasPhysical"]
+
+
+def test_physique_tiree_du_texte_de_la_notice():
+    """Course pan/tilt, zoom, angle des couteaux et rotation du module lus dans le texte de la notice
+    quand la charte ne les donne pas."""
+    p = Projet("T", "F", "", [Mode("M", [Canal(1, nom="Pan", attribut="Pan"), Canal(3, nom="Tilt", attribut="Tilt"),
+                                          Canal(5, nom="Zoom", attribut="Zoom", description="Zoom wide to narrow"),
+                                          Canal(6, nom="Blade 1 swivel", attribut="Blade1Rot"),
+                                          Canal(7, nom="Frame rotation", attribut="ShaperRot"),
+                                          Canal(8, nom="Blade 2 swivel", attribut="Blade2Rot",
+                                                plages=[Plage(0, 255, "-30° to +30°", phys_de=-30, phys_a=30)])])])
+    pdfchart.appliquer_faits(p, "Pan: 0-540°\nTilt movement 265°\nZoom range 4.5° ~ 50°\n"
+                                "blade angle adjustment of min. ±25° and a module rotation of min. ±60°")
+    got = {c.attribut: (c.phys_de, c.phys_a) for c in p.modes[0].canaux}
+    assert got["Pan"] == (-270, 270) and got["Tilt"] == (-132.5, 132.5)
+    assert got["Zoom"] == (50, 4.5)
+    assert got["Blade1Rot"] == (-25, 25) and got["ShaperRot"] == (-60, 60)
+    assert got["Blade2Rot"] == (None, None)  # la charte donne déjà ses degrés
