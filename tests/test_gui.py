@@ -667,3 +667,28 @@ def test_double_clic_montre_tous_les_canaux(tmp_path, monkeypatch):
     assert any(t.startswith("20 ") for t in dlg.channel_texts())
     dlg.close()
     win.close()
+
+
+def test_gdtf_share_erreur_reseau_expliquee_en_fenetre(_no_message_boxes):
+    """Jo, 14/11/2026 : la connexion échouait sans explication claire."""
+    import requests
+    from PySide6.QtWidgets import QApplication
+    from ma3lib import gdtf_share
+    from ma3lib.gui import share
+
+    app = QApplication.instance() or QApplication([])
+
+    class Down:
+        def __init__(self, *a):
+            pass
+
+        def login(self):
+            raise requests.exceptions.ConnectionError("Name or service not known")
+
+    page = share.SharePage(client_factory=Down)
+    page.user.setText("jo@example.com")
+    page.password.setText("x")
+    assert not page.connect_account()
+    assert _no_message_boxes and _no_message_boxes[-1][0] == "warning"
+    assert "pas de connexion au site" in page.status.text()
+    assert "certificat" in gdtf_share.explain(requests.exceptions.SSLError("CERTIFICATE_VERIFY_FAILED"))

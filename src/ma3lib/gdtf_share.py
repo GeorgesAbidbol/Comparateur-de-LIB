@@ -88,9 +88,39 @@ def search(entries: list[ShareEntry], text: str) -> list[ShareEntry]:
             if all(w in f"{e.manufacturer} {e.fixture}".lower() for w in words)]
 
 
+def _system_certificates() -> None:
+    """Certificats du système (Windows) pour HTTPS, en plus de ceux livrés avec l'appli :
+    un antivirus ou un réseau qui inspecte HTTPS ne casse plus la connexion. Sans le module
+    `truststore`, on garde ceux de `requests`."""
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+    except Exception:
+        pass
+
+
+def explain(exc: Exception) -> str:
+    """Phrase lisible pour une erreur de connexion (réseau, certificat, site en panne…)."""
+    if isinstance(exc, ShareError):
+        return str(exc)
+    name, text = type(exc).__name__, str(exc)
+    if "SSL" in name or "CERTIFICATE" in text.upper():
+        hint = "certificat HTTPS refusé (antivirus ou réseau qui filtre HTTPS ?)"
+    elif "Timeout" in name:
+        hint = "le site ne répond pas (réseau lent ou site en panne)"
+    elif "Proxy" in name:
+        hint = "proxy du réseau refusé"
+    elif "Connection" in name:
+        hint = "pas de connexion au site (pas d'internet, pare-feu, ou site en panne)"
+    else:
+        hint = "erreur inattendue"
+    return f"{hint} — {name}: {text[:300]}"
+
+
 class GdtfShareClient:
     def __init__(self, user: Optional[str] = None, password: Optional[str] = None):
         import requests  # import tardif : le reste de l'appli fonctionne sans
+        _system_certificates()
 
         self.user = user or os.environ.get("GDTF_SHARE_USER", "")
         self.password = password or os.environ.get("GDTF_SHARE_PASSWORD", "")
@@ -140,3 +170,44 @@ def _json(response) -> dict:
 
 def _safe(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]+', "_", name).strip() or "fixture"
+
+
+def selftest() -> tuple[bool, list[str]]:
+    """Contrôle de l'exe à la fabrication (« --selftest-share ») : certificats, coffre Windows,
+    et le site GDTF Share joignable. Le site est interrogé avec un compte bidon : un refus
+    propre (« connexion refusée ») prouve que réseau, HTTPS et lecture de la réponse marchent."""
+    ok, out = True, []
+    try:
+        import truststore  # noqa: F401
+        out.append("certificats système : truststore présent")
+    except Exception as exc:
+        out.append(f"certificats système : absent ({exc})")
+    from . import coffre
+    kr = coffre._backend()
+    if kr is None:
+        ok = False
+        out.append("coffre : module keyring absent")
+    else:
+        name = type(kr.get_keyring()).__module__ + "." + type(kr.get_keyring()).__name__
+        out.append(f"coffre : {name}")
+        try:
+            kr.set_password("Banane Pot - essai", "essai", "secret-essai")
+            good = kr.get_password("Banane Pot - essai", "essai") == "secret-essai"
+            kr.delete_password("Banane Pot - essai", "essai")
+            out.append("coffre : écriture/lecture/effacement OK" if good else "coffre : relu différent")
+            ok = ok and good
+        except Exception as exc:
+            ok = False
+            out.append(f"coffre : ÉCHEC {type(exc).__name__}: {exc}")
+    try:
+        GdtfShareClient("banane-pot-selftest@example.invalid", "pas-un-vrai-mot-de-passe").login()
+        out.append("site : connexion acceptée ?! (inattendu)")
+    except ShareError as exc:
+        good = "connexion refusée" in str(exc)
+        ok = ok and good
+        out.append(f"site : joignable, compte bidon refusé comme prévu ({exc})" if good
+                   else f"site : réponse inattendue ({exc})")
+    except Exception as exc:
+        ok = False
+        out.append(f"site : ÉCHEC {explain(exc)}")
+    return ok, out

@@ -132,6 +132,15 @@ def main(argv: list[str] | None = None) -> int:
     icon = Path(__file__).resolve().parent.parent / "data" / "banane-pot.ico"
     if icon.exists():
         app.setWindowIcon(QIcon(str(icon)))
+    if argv and argv[0] == "--selftest-share":  # contrôle de l'exe : coffre, certificats, site GDTF Share
+        from .. import gdtf_share
+        ok, lines = gdtf_share.selftest()
+        text = "\n".join(lines) + ("\nRESULTAT OK\n" if ok else "\nRESULTAT ECHEC\n")
+        if len(argv) > 1:
+            Path(argv[1]).write_text(text, encoding="utf-8")
+        else:
+            print(text)
+        return 0 if ok else 1
     win = AppWindow()
     if argv and argv[0] == "--selftest":  # contrôle de l'exe à la fabrication : la fenêtre se construit
         win.show()

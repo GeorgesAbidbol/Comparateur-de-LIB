@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QApplication, QCheckBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QMessageBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMenu, QPushButton, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, coffre, gdtf_share
@@ -118,6 +118,13 @@ class SharePage(QWidget):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         QApplication.processEvents()
 
+    def _fail(self, exc: Exception) -> None:
+        """Erreur affichée en bas ET dans une fenêtre (Jo, 14/11/2026 : connexion qui échoue sans rien dire)."""
+        QApplication.restoreOverrideCursor()
+        text = gdtf_share.explain(exc)
+        self.status.setText(f"Impossible : {text}")
+        QMessageBox.warning(self, APP_NAME, f"GDTF Share : {text}")
+
     def connect_account(self) -> bool:
         """Connexion puis liste complète des fixtures (une seule fois par session)."""
         user, password = self.user.text().strip(), self.password.text()
@@ -131,11 +138,8 @@ class SharePage(QWidget):
             self.status.setText("Connecté. Chargement de la liste des fixtures…")
             QApplication.processEvents()
             self.entries = client.list()
-        except gdtf_share.ShareError as exc:
-            self.status.setText(f"Impossible : {exc}")
-            return False
-        except Exception as exc:  # pas de réseau, pare-feu…
-            self.status.setText(f"GDTF Share injoignable : {type(exc).__name__}")
+        except Exception as exc:  # identifiants refusés, pas de réseau, pare-feu, certificat…
+            self._fail(exc)
             return False
         finally:
             QApplication.restoreOverrideCursor()
@@ -231,11 +235,9 @@ class SharePage(QWidget):
         self._busy(f"Téléchargement de {entry.fixture}…")
         try:
             path = self.client.download(entry, self.folder or download_dir())
-        except gdtf_share.ShareError as exc:
-            self.status.setText(f"Impossible : {exc}")
-            return None
         except Exception as exc:
-            self.status.setText(f"GDTF Share injoignable : {type(exc).__name__}")
+            QApplication.restoreOverrideCursor()
+            self._fail(exc)
             return None
         finally:
             QApplication.restoreOverrideCursor()
