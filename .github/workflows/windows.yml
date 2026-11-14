@@ -33,6 +33,8 @@ jobs:
           pyinstaller --noconfirm --windowed --name "Banane Pot"
           --icon src/ma3lib/data/banane-pot.ico
           --collect-data ma3lib --collect-data pdfminer --collect-all pypdfium2
+          --collect-all keyring --collect-all truststore --copy-metadata keyring
+          --hidden-import win32ctypes.core
           --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtQml
           --exclude-module PySide6.QtQuick --exclude-module PySide6.Qt3DCore
           packaging/banane_pot.py
@@ -43,6 +45,12 @@ jobs:
         run: |
           $p = Start-Process -FilePath "dist\Banane Pot\Banane Pot.exe" -ArgumentList "--selftest" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Banane Pot.exe ne démarre pas (code $($p.ExitCode))" }
+      - name: GDTF Share depuis l'exe (coffre Windows, certificats, site joignable)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\Banane Pot\Banane Pot.exe" -ArgumentList "--selftest-share","share.txt" -Wait -PassThru
+          Get-Content share.txt
+          if ($p.ExitCode -ne 0) { throw "GDTF Share ne marche pas depuis l'exe (code $($p.ExitCode))" }
       - name: Installeur (Inno Setup)
         shell: pwsh
         run: |

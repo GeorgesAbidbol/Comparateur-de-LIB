@@ -94,6 +94,23 @@ def tricky(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_message_boxes(monkeypatch):
+    """Les fenêtres de message bloqueraient les tests : on les note au lieu de les ouvrir."""
+    try:
+        from PySide6.QtWidgets import QMessageBox
+    except ImportError:
+        yield []
+        return
+    shown = []
+    for kind in ("warning", "information", "critical"):
+        monkeypatch.setattr(QMessageBox, kind, staticmethod(
+            lambda parent, title, text, *a, _k=kind, **kw: shown.append((_k, text)) or QMessageBox.Ok))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(
+        lambda parent, title, text, *a, **kw: shown.append(("question", text)) or QMessageBox.Yes))
+    yield shown
+
+
+@pytest.fixture(autouse=True)
 def _qt_cleanup():
     """Détruit les fenêtres Qt à la fin de chaque test : sinon Python les libère dans le
     désordre à la sortie et le processus plante (code de sortie non nul malgré les tests verts)."""

@@ -14,6 +14,7 @@ Géométries : par défaut Base > Yoke (Pan) > Head (Tilt et le reste). Une géo
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import uuid
@@ -39,6 +40,10 @@ class Plage:
     debut: int
     fin: int
     nom: str
+    groupe: str = ""  # titre de section de la notice (« Color Slot », « Ovalizer Rotation »…)
+    attribut: str = ""  # fonction de la plage (Shutter1Strobe…) ; vide = à deviner
+    phys_de: Optional[float] = None  # valeur physique au début / à la fin de la plage
+    phys_a: Optional[float] = None
 
 
 @dataclass
@@ -47,10 +52,13 @@ class Canal:
     fine: Optional[int] = None
     nom: str = ""  # texte de la notice
     attribut: str = ""  # attribut GDTF / MA3 ; vide = à deviner
-    geometrie: str = ""  # vide = Yoke pour Pan, Head pour le reste
+    geometrie: str = ""  # vide = Yoke pour Pan, Base pour les contrôles, Head pour le reste
     copies: int = 1  # > 1 : la géométrie devient un modèle + N références
     defaut: int = 0
     plages: list[Plage] = field(default_factory=list)
+    description: str = ""  # texte « fonction » de la notice quand le canal n'a pas de plages
+    phys_de: Optional[float] = None  # valeur physique à DMX 0 / à DMX 255 (degrés, kelvins, 0-1…)
+    phys_a: Optional[float] = None
 
     @property
     def adresses(self) -> list[int]:
@@ -81,6 +89,18 @@ class Projet:
     court: str = ""
     modes: list[Mode] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # remarques de la lecture du PDF
+    images: dict[str, str] = field(default_factory=dict)  # « roue|emplacement » -> PNG en base64
+
+    def image(self, roue: str, emplacement: str) -> Optional[bytes]:
+        data = self.images.get(cle_image(roue, emplacement))
+        return base64.b64decode(data) if data else None
+
+    def definir_image(self, roue: str, emplacement: str, png: Optional[bytes]) -> None:
+        """Image d'un emplacement de roue (gobo, couleur) ; None la retire."""
+        if png:
+            self.images[cle_image(roue, emplacement)] = base64.b64encode(png).decode("ascii")
+        else:
+            self.images.pop(cle_image(roue, emplacement), None)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False, indent=1)
@@ -90,7 +110,12 @@ class Projet:
         d = json.loads(text)
         modes = [Mode(m["nom"], [Canal(**{**c, "plages": [Plage(**p) for p in c.get("plages", [])]})
                                  for c in m.get("canaux", [])]) for m in d.get("modes", [])]
-        return cls(d.get("fabricant", ""), d.get("nom", ""), d.get("court", ""), modes, d.get("notes", []))
+        return cls(d.get("fabricant", ""), d.get("nom", ""), d.get("court", ""), modes, d.get("notes", []),
+                   d.get("images", {}))
+
+
+def cle_image(roue: str, emplacement: str) -> str:
+    return f"{roue}|{emplacement.strip().lower()}"
 
 
 def _par_geometrie(mode: Mode) -> dict[str, list[Canal]]:
@@ -125,6 +150,10 @@ _RULES: list[tuple[str, str]] = [
     (r"(frame|shaper|blade|framing)s?.*rot", "ShaperRot"),
     (r"(ovali[sz]er|beam ?shaper).*(index|rot)", "BeamShaperPos"),
     (r"ovali[sz]er|beam ?shaper", "BeamShaper"),
+    (r"animation.*speed", ""),  # vitesse des mouvements d'animation : pas d'attribut standard
+    (r"\bfx wheel|animation wheel|effects? wheel", "AnimationWheel1"),
+    (r"wheel (\d)\b.*selection", r"Gobo\1"),  # « Breakup wheel (wheel 1): gobo selection, indexing, shake… »
+    (r"wheel (\d)\b.*(index|rot)", r"Gobo\1Pos"),
     (r"gobo\s*(\d)?.*(index|rot)", r"Gobo\1Pos"),
     (r"gobo\s*(\d)?", r"Gobo\1"),
     (r"prism\s*(\d)?.*(index|rot)", r"Prism\1Pos"),
@@ -227,10 +256,133 @@ def attribuer(mode: Mode, force: bool = False) -> None:
         used = pris.setdefault(c.geometrie, set())
         if attr in used:
             # famille numérotée (ColorMacro1, Control1…) : le suivant ; sinon un attribut maison
-            numbered = bool(re.search(r"\d$", attr))
+            numbered = bool(re.search(r"\d$", attr)) or attr == "NoFeature"
             attr = _suivant(attr, used) if numbered or nom_maison(c.nom) in used else nom_maison(c.nom)
         used.add(attr)
         c.attribut = attr
+
+
+# --------------------------------------------------------------------------
+# Détail des plages : fonction (sous-attribut) et valeurs physiques
+# --------------------------------------------------------------------------
+
+_NUM = r"([-+]?\d+(?:[.,]\d+)?)"
+_UNIT = r"(°|%|hz|k\b|rpm)"
+_PAIR = re.compile(rf"{_NUM}\s*{_UNIT}?\s*(?:to|towards|-|→|>|/)\s*{_NUM}\s*{_UNIT}", re.I)
+_ONE = re.compile(rf"{_NUM}\s*{_UNIT}", re.I)
+_PLAIN_PAIR = re.compile(r"(\d\.\d+)\s*to\s*(\d\.\d+)", re.I)
+
+
+def _value(text: str, unit: str) -> float:
+    unit = unit.lower()
+    if unit == "k" and re.fullmatch(r"[-+]?\d{1,2}[.,]\d{3}", text):
+        text = re.sub(r"[.,]", "", text)  # « 2.200K » : séparateur de milliers
+    v = float(text.replace(",", "."))
+    if unit == "%":
+        return v / 100
+    if unit == "rpm":
+        return v * 6  # tours/minute -> degrés/seconde
+    return v
+
+
+def physique(texte: str, attribut: str = "") -> Optional[tuple[float, float]]:
+    """Valeurs physiques (début, fin) lues dans un texte de notice, ou None.
+    « Swivelling from -25° towards 0° » -> (-25, 0) ; « 2.200K to 15.000K » -> (2200, 15000) ;
+    « 0 – 100% » -> (0, 1) ; « Open » sur un shutter -> (1, 1)."""
+    t = re.sub(r"degrees?|\bdeg\b", "°", texte.replace("–", "-").replace("—", "-"), flags=re.I)
+    if re.search(r"°", t) and re.search(r"\bslow\b|\bfast\b|maximum|\bmax\b", t, re.I):
+        return None  # « 360° slow → 10° fast » (amplitude d'un shake), « 0° → maximum » : pas une course connue
+    kelvins = re.findall(r"(\d{4,5})\s*K\b", t)
+    if len(kelvins) == 2:  # « Open (6000 K) → warm (3200 K) »
+        return float(kelvins[0]), float(kelvins[1])
+    if (m := _PAIR.search(t)):
+        unit = m.group(4)
+        return _value(m.group(1), m.group(2) or unit), _value(m.group(3), unit)
+    if (m := _ONE.search(t)):
+        v = _value(m.group(1), m.group(2))
+        return v, v
+    if attribut.startswith("CIE_") and (m := _PLAIN_PAIR.search(t)):
+        return float(m.group(1)), float(m.group(2))
+    low = re.sub(r"\s*(?:→|->|>)\s*", " to ", t.lower())
+    if re.match(r"^Shutter\d+$", attribut):
+        if re.search(r"\bopen\b|led on|\bon\b", low):
+            return 1.0, 1.0
+        if re.search(r"clos|blackout|\boff\b", low):
+            return 0.0, 0.0
+    if re.search(r"max\w* to min|open to clos|wide to narrow", low):
+        return 1.0, 0.0
+    if re.search(r"min\w* to max|clos\w* to open|narrow to wide", low):
+        return 0.0, 1.0
+    if attribut == "Iris" and re.fullmatch(r"\s*open\s*", low):
+        return 1.0, 1.0
+    if attribut == "Iris" and re.fullmatch(r"\s*closed?\s*", low):
+        return 0.0, 0.0
+    return None
+
+
+def sous_attribut(attribut: str, texte: str) -> str:
+    """Fonction précise d'une plage d'après son texte (titre de section + nom) :
+    « Strobe from slow to fast » sur Shutter1 -> Shutter1Strobe. Par défaut, l'attribut du canal."""
+    t = texte.lower()
+    spin = bool(re.search(r"rotat|spin|rainbow|scroll|\bcw\b|\bccw\b|forward|backward", t))
+    stop = bool(re.search(r"no rotation|\bstop\b", t))
+    if (m := re.match(r"^Shutter(\d+)$", attribut)):
+        n, rnd = m.group(1), "random" in t or "randon" in t
+        if "pulse" in t:
+            kind = "Open" if re.search(r"pulse (in|open)|opening", t) else "Close" if re.search(r"pulse (out|clos)|closing", t) else ""
+            return f"Shutter{n}StrobeRandomPulse{kind}" if rnd else f"Shutter{n}StrobePulse{kind}"
+        if rnd:
+            return f"Shutter{n}StrobeRandom"
+        if "strob" in t or "flash" in t:
+            return f"Shutter{n}Strobe"
+    elif attribut == "Iris":
+        rnd = "Random" if "random" in t else ""
+        if "pulse" in t and re.search(r"clos", t):
+            return f"Iris{rnd}PulseClose"
+        if "pulse" in t and "open" in t:
+            return f"Iris{rnd}PulseOpen"
+        if "strob" in t:
+            return "IrisStrobeRandom" if rnd else "IrisStrobe"
+    elif (m := re.match(r"^(Color|Gobo|AnimationWheel)(\d+)$", attribut)):
+        fam, n = m.groups()
+        speed = bool(re.search(r"slow|fast|speed|\bcw\b|\bccw\b|forward|backward|rainbow", t))
+        if "shake" in t and fam == "Gobo":
+            return f"Gobo{n}SelectShake"
+        if fam == "AnimationWheel" and re.search(r"movement|macro", t):
+            return f"AnimationWheel{n}Macro"
+        if fam == "Gobo" and "gobo rotation" in t and not re.search(r"wheel (scroll|rotat|spin)", t):
+            return f"Gobo{n}SelectSpin"  # le gobo choisi tourne sur lui-même
+        if spin and not speed and not stop and re.search(r"scroll", t) and not re.search(r"rotat|spin|rainbow", t):
+            return attribut  # « Continuous scroll : Open → Slot 1 » : des positions de la roue, pas une vitesse
+        if "random" in t:
+            return f"{fam}{n}WheelRandom" if fam != "AnimationWheel" else f"{fam}{n}Random"
+        if "audio" in t or "sound" in t or "music" in t:
+            return f"{fam}{n}WheelAudio" if fam != "AnimationWheel" else f"{fam}{n}Audio"
+        if spin or stop:
+            return f"{fam}{n}WheelSpin" if fam != "AnimationWheel" else f"{fam}{n}"
+    elif re.match(r"^(Gobo\d+|Prism\d+|BeamShaper|AnimationWheel\d+)Pos$", attribut):
+        if (spin and re.search(r"slow|fast|speed|forward|backward|\bcw\b|\bccw\b", t)) or (stop and "index" not in t):
+            return attribut + "Rotate"
+    elif (m := re.match(r"^Prism(\d+)$", attribut)) and spin and "index" not in t \
+            and not re.search(r"\bset\b|\bon ch|next ch", t):  # « set speed on ch. 18 » : un autre canal règle la rotation
+        return f"Prism{m.group(1)}PosRotate"
+    return attribut
+
+
+def detailler(mode: Mode, force: bool = False) -> None:
+    """Complète les plages (fonction, physique) et la physique des canaux d'après les textes."""
+    for c in mode.canaux:
+        if not c.attribut:
+            continue
+        for p in c.plages:
+            if not p.attribut or force:
+                p.attribut = sous_attribut(c.attribut, f"{p.groupe} {p.nom}")
+            if p.phys_de is None and p.phys_a is None:
+                if (ph := physique(p.nom, p.attribut)) is not None:
+                    p.phys_de, p.phys_a = ph
+        if c.phys_de is None and c.phys_a is None and not c.plages:
+            if (ph := physique(c.description, c.attribut)) is not None and ph[0] != ph[1]:
+                c.phys_de, c.phys_a = ph
 
 
 # --------------------------------------------------------------------------
@@ -279,10 +431,37 @@ def verifier(projet: Projet) -> list[str]:
     return out
 
 
+def est_controle(attribut: str) -> bool:
+    """Réglage du projecteur entier (Control1, NoFeature, Fans, LEDFrequency…) : la « feature » Control."""
+    if re.match(r"^(Control|NoFeature)\d*$", attribut):
+        return True
+    known = attributs.ma3_known(attributs.ma3_name(attribut))
+    return bool(known) and known.get("feature", "").startswith("Control.")
+
+
 def _geo_name(c: Canal) -> str:
+    """Géométrie d'un canal sans nom de géométrie : Yoke pour le pan, Base pour les contrôles
+    (règle de Jo, 13/11/2026 : « le control toujours sur la géométrie Base »), Head pour le reste."""
     if c.geometrie:
         return _clean(c.geometrie)
+    if est_controle(c.attribut):
+        return BASE
     return YOKE if c.attribut in ("Pan", "PanRotate") else HEAD
+
+
+def nom_court(nom: str) -> str:
+    """Libellé de contrôle réduit à l'essentiel (Jo, 13/11/2026) : sans les précisions entre
+    parenthèses ni la durée d'appui. « Linear dimming curve – 1 sec. (menu override, …) » -> « Linear dimming curve »."""
+    t = re.sub(r"\([^)]*\)?", " ", nom)
+    t = re.sub(r"[–—-]?\s*\d+\s*sec\.?(onds?)?\b\.?", " ", t, flags=re.I)
+    t = re.sub(r"\s+", " ", t).strip(" .,;:–—-")
+    return t or nom.strip()
+
+
+def _dmx(c: Canal, value: int) -> str:
+    """Valeur DMX GDTF. Un canal 16 bits donné à 128 est au centre exact (32768 sur 65535) :
+    écrit « 128/1 », un pan de 540° se retrouvait à 1,06° au lieu de 0."""
+    return "32768/2" if c.fine is not None and value == 128 else f"{value}/1"
 
 
 def _clean(name: str) -> str:
@@ -298,27 +477,233 @@ def _definition(name: str) -> dict[str, str]:
     if std is None:
         return {"Name": name, "Pretty": name, "Feature": "Control.Control"}
     digits = re.findall(r"\d+", name)
-    pretty = std.get("pretty") or name
-    for d in digits:
-        pretty = re.sub(r"\((n|m)\)", d, pretty, count=1)
-    out = {"Name": name, "Pretty": pretty, "Feature": std["feature"]}
-    if std.get("activation_group"):
-        ag = std["activation_group"]
+
+    def numbered(text: str) -> str:
         for d in digits:
-            ag = re.sub(r"\((n|m)\)", d, ag, count=1)
-        out["ActivationGroup"] = ag
+            text = re.sub(r"\((n|m)\)", d, text, count=1)
+        return text
+
+    out = {"Name": name, "Pretty": numbered(std.get("pretty") or name), "Feature": std["feature"]}
+    if std.get("activation_group"):
+        out["ActivationGroup"] = numbered(std["activation_group"])
+    if std.get("main"):
+        out["MainAttribute"] = numbered(std["main"])
     if std.get("physical_unit"):
         out["PhysicalUnit"] = std["physical_unit"]
     return out
 
 
+# Émetteurs LED : couleur (x, y) et longueur d'onde dominante TYPIQUES de chaque type de LED.
+# Les notices ne donnent presque jamais ces mesures : valeurs d'usage, à affiner si le fabricant
+# les publie. Clé = suffixe de l'attribut ColorAdd_*.
+EMETTEURS = {
+    "R": ("Red", 0.700, 0.299, 630), "G": ("Green", 0.170, 0.700, 525), "B": ("Blue", 0.152, 0.026, 450),
+    "C": ("Cyan", 0.070, 0.560, 500), "M": ("Magenta", 0.385, 0.155, 0), "Y": ("Yellow", 0.480, 0.500, 575),
+    "RY": ("Amber", 0.575, 0.420, 592), "GY": ("Lime", 0.410, 0.555, 566), "GC": ("Mint", 0.270, 0.480, 520),
+    "BC": ("Light Blue", 0.130, 0.110, 475), "BM": ("Royal Blue", 0.157, 0.018, 445),
+    "RM": ("Deep Red", 0.720, 0.280, 660), "W": ("White", 0.3127, 0.3290, 0),
+    "WW": ("Warm White", 0.440, 0.403, 0), "CW": ("Cool White", 0.310, 0.320, 0), "UV": ("UV", 0.170, 0.010, 395),
+}
+FILTRES = {"C": ("Cyan", 0.2247, 0.3287, 78.7), "M": ("Magenta", 0.3209, 0.1542, 28.5),
+           "Y": ("Yellow", 0.4193, 0.5053, 92.8)}
+
+# Couleurs d'emplacements de roue d'après leur nom (sRGB) ; le nom le plus long l'emporte.
+COULEURS = {
+    "open": "ffffff", "white": "ffffff", "red": "e60000", "dark red": "8b0000", "deep red": "a00000",
+    "green": "00c000", "dark green": "006400", "blue": "0030ff", "dark blue": "00008b", "deep blue": "0000a0",
+    "light blue": "66b3ff", "congo": "2a0a8f", "magenta": "ff00ff", "dark magenta": "8b008b", "pink": "ff69b4",
+    "cyan": "00ffff", "yellow": "ffe600", "orange": "ff8000", "amber": "ffbf00", "lavender": "b57edc",
+    "purple": "800080", "violet": "7f00ff", "uv": "4b0082", "cto": "ffd9a0", "ctb": "cfe4ff",
+    "lime": "bfff00", "turquoise": "40e0d0", "aqua": "00c8c8", "minus green": "ffb0ff",
+    "1/2 minus green": "ffd8ff", "half minus green": "ffd8ff",
+}
+
+
+def _xyY(hexa: str) -> str:
+    rgb = [int(hexa[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+    X = 0.4124 * lin[0] + 0.3576 * lin[1] + 0.1805 * lin[2]
+    Y = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    Z = 0.0193 * lin[0] + 0.1192 * lin[1] + 0.9505 * lin[2]
+    total = X + Y + Z
+    if total <= 0:
+        return "0.3127,0.3290,0.0"
+    return f"{X / total:.4f},{Y / total:.4f},{Y * 100:.1f}"
+
+
+def _luminance(x: float, y: float) -> float:
+    """Luminance Y (0-100) d'un émetteur saturé : la plus forte qui garde ses composantes RVB
+    dans 0-1, comme dans les fixtures de la console (un bleu pur est sombre, un lime clair)."""
+    from .ma3xml import color_ma3
+    rgb = [float(v) for v in color_ma3(f"{x},{y},100").split(",")[:3]]
+    return 100.0 / max(1.0, max(rgb))
+
+
+def couleur_emplacement(nom: str) -> str:
+    low = nom.lower()
+    keys = [k for k in COULEURS if re.search(rf"\b{re.escape(k)}\b", low)]
+    return _xyY(COULEURS[max(keys, key=len)]) if keys else "0.3127,0.3290,100.0"
+
+
+_WHEEL = re.compile(r"^(Color|Gobo|AnimationWheel|Prism)(\d+)")
+_WHEEL_NAMES = {"Color": "ColorWheel", "Gobo": "GoboWheel", "AnimationWheel": "AnimationWheel", "Prism": "PrismWheel"}
+_NOT_SLOT = re.compile(r"\+|&|\bto\b|→|>|rotat|spin|rainbow|shake|index|no function|reserved|\bstops?\b", re.I)
+
+
+def roue_de(attribut: str) -> str:
+    """Nom de la roue d'un attribut (Color1, Color1WheelSpin -> « ColorWheel 1 »), ou ''."""
+    m = _WHEEL.match(attribut)
+    if not m or re.search(r"Pos(Rotate)?$", attribut):
+        return ""
+    return f"{_WHEEL_NAMES[m.group(1)]} {m.group(2)}"
+
+
+def roues(projet: Projet) -> dict[str, list[str]]:
+    """Roues du fixture et leurs emplacements, tirés des plages des canaux de roue :
+    chaque nom de plage entière (pas « Open + Red », pas une rotation) est un emplacement."""
+    out: dict[str, list[str]] = {}
+    for mode in projet.modes:
+        for c in mode.canaux:
+            wheel = roue_de(c.attribut)
+            if not wheel or not c.plages:
+                continue
+            slots = out.setdefault(wheel, [])
+            for p in c.plages:
+                name = p.nom.strip()
+                if name and (p.attribut or c.attribut) == c.attribut and not _NOT_SLOT.search(name) \
+                        and name.lower() not in (s.lower() for s in slots):
+                    slots.append(name)
+    return {w: s for w, s in out.items() if s}
+
+
+def canaux_de_roue(projet: Projet) -> dict[str, str]:
+    """Roue -> noms (notice) de ses canaux, pour reconnaître la roue dont parle un titre de la notice."""
+    out: dict[str, set[str]] = {}
+    for mode in projet.modes:
+        for c in mode.canaux:
+            wheel = roue_de(c.attribut)
+            if wheel:
+                out.setdefault(wheel, set()).add(c.nom)
+    return {w: " ".join(sorted(n)) for w, n in out.items()}
+
+
+def emetteurs(projet: Projet) -> list[str]:
+    """Noms des émetteurs LED créés (un par attribut ColorAdd_* utilisé)."""
+    used = {c.attribut for m in projet.modes for c in m.canaux}
+    return [EMETTEURS[k][0] for k in EMETTEURS if f"ColorAdd_{k}" in used]
+
+
+def _num(v: float) -> str:
+    return f"{v:.6f}".rstrip("0").rstrip(".") or "0"
+
+
+def _alternatives(c: Canal) -> list[list[Plage]]:
+    """Les plages dans l'ordre de la notice ; quand les valeurs DMX repartent en arrière, c'est une
+    autre lecture du même canal (ex. indexation OU rotation, selon un autre canal)."""
+    out: list[list[Plage]] = []
+    for p in c.plages:
+        if not out or p.debut <= out[-1][-1].debut:
+            out.append([])
+        out[-1].append(p)
+    return out
+
+
+def _maitre(mode: Mode, c: Canal, alt: list[Plage]) -> Optional[tuple[Canal, Plage]]:
+    """Canal et plage qui choisissent cette lecture : une plage d'un autre canal qui porte le
+    même titre (« Ovalizer Rotation (set next ch) » pour la section « Ovalizer Rotation »)."""
+    titles = {t for t in ((alt[0].groupe or "").strip().lower(), alt[0].nom.strip().lower() if len(alt) == 1 else "") if t}
+    for other in mode.canaux:
+        if other is c:
+            continue
+        for p in other.plages:
+            name = re.sub(r"\s*\([^)]*\)", "", p.nom).strip().lower()
+            if name and any(name == t or name in t or t in name for t in titles):
+                return other, p
+    return None
+
+
+def _genre(texte: str) -> str:
+    """« rot » (rotation continue) ou « index » : ce que choisit une plage d'un canal maître."""
+    t = texte.lower()
+    if "index" in t:
+        return "index"
+    return "rot" if re.search(r"rotat|spin", t) else ""
+
+
+def _maitres(mode: Mode, c: Canal, alt: list[Plage]) -> list[tuple[Canal, Plage]]:
+    """Plages du canal maître qui choisissent cette lecture. Soit une plage du même titre (`_maitre`),
+    soit, pour un canal d'index/rotation (Gobo1Pos, Prism1Pos), les plages du canal de sélection
+    (Gobo1, Prism1) du même genre : « If indexed gobo is selected on channel 8 » -> ses plages
+    d'indexation ; elles peuvent former plusieurs suites (0-34 et 60-209)."""
+    kind = _genre(alt[0].groupe or "")
+    base = re.sub(r"Pos(Rotate)?$", "", c.attribut)
+    other = next((o for o in mode.canaux if o is not c and o.attribut == base), None)
+    if not kind or other is None or base == c.attribut:
+        one = _maitre(mode, c, alt)
+        return [one] if one is not None else []
+    out: list[tuple[Canal, Plage]] = []
+    last_ok = False
+    for p in other.plages:
+        ok = _genre(f"{p.groupe} {p.nom}") == kind
+        if ok and last_ok and out[-1][1].fin + 1 >= p.debut > out[-1][1].debut:
+            out[-1][1].fin = p.fin
+        elif ok:
+            out.append((other, Plage(p.debut, p.fin, p.groupe or p.nom)))
+        last_ok = ok
+    return out
+
+
+def _fonctions(mode: Mode, c: Canal, notes: list[str]) -> list[dict]:
+    """Découpe un canal en fonctions GDTF : une par suite de plages de même fonction et de même section."""
+    alts = _alternatives(c)
+    out: list[dict] = []
+    if not alts:
+        return [{"attr": c.attribut, "name": (c.nom or c.attribut).strip(), "from": 0, "plages": [],
+                 "phys": (c.phys_de, c.phys_a), "master": None}]
+    found = [_maitres(mode, c, alt) if len(alts) > 1 else [] for alt in alts]
+    if len(alts) > 1 and not any(found):
+        notes.append(f"{mode.nom}, canal {c.adresse} « {c.nom} » : plusieurs lectures du même canal sans canal "
+                     f"maître trouvé, seule la première est gardée.")
+        alts, found = alts[:1], [[]]
+    pairs = [(alt, m) for alt, ms in zip(alts, found) for m in (ms or [None])]  # une fonction par suite du maître
+    for alt, master in pairs:
+        if len(alts) > 1 and master is None and alt is not alts[0]:
+            notes.append(f"{mode.nom}, canal {c.adresse} « {c.nom} » : section « {alt[0].groupe or alt[0].nom} » "
+                         f"ignorée (pas de canal maître trouvé).")
+            continue
+        cur: Optional[dict] = None
+        for p in alt:
+            attr = p.attribut or c.attribut
+            if cur is None or cur["attr"] != attr or cur["groupe"] != p.groupe:
+                cur = {"attr": attr, "groupe": p.groupe, "from": p.debut, "plages": [], "master": master}
+                out.append(cur)
+            cur["plages"].append(p)
+        first = next((f for f in out if f["master"] is master and f["plages"] and f["plages"][0] is alt[0]), None)
+        if first is not None:
+            first["from"] = 0  # une lecture couvre le canal depuis 0
+    seen: dict[str, int] = {}
+    for f in out:
+        ps = f["plages"]
+        name = (ps[0].nom if len(ps) == 1 else f["groupe"] or (c.nom if f["attr"] == c.attribut else f["attr"])).strip()
+        name = re.sub(r"[.\"]", " ", name) or f["attr"]
+        seen[name] = seen.get(name, 0) + 1
+        f["name"] = name if seen[name] == 1 else f"{name} {seen[name]}"
+        with_phys = [p for p in ps if p.phys_de is not None]
+        f["phys"] = (with_phys[0].phys_de, with_phys[-1].phys_a) if with_phys else (
+            (c.phys_de, c.phys_a) if f["attr"] == c.attribut and len(out) == 1 else (None, None))
+    return out
+
+
 def construire(projet: Projet) -> FixtureType:
-    """Le `FixtureType` GDTF du projet. Lève `CreationError` si le projet est incomplet."""
+    """Le `FixtureType` GDTF du projet. Lève `CreationError` si le projet est incomplet.
+    Les remarques de construction (sections ignorées…) sont ajoutées à `projet.notes`."""
     for mode in projet.modes:
         attribuer(mode)
+        detailler(mode)
     problems = verifier(projet)
     if problems:
         raise CreationError("\n".join(problems))
+    notes: list[str] = []
 
     root = ET.Element("GDTF", {"DataVersion": "1.2"})
     name = projet.nom.strip()
@@ -328,8 +713,13 @@ def construire(projet: Projet) -> FixtureType:
         "FixtureTypeID": str(uuid.uuid4()).upper(), "RefFT": "", "CanHaveChildren": "Yes",
     })
 
-    used = sorted({c.attribut for m in projet.modes for c in m.canaux})
-    defs = [_definition(a) for a in used]
+    used = {c.attribut for m in projet.modes for c in m.canaux}
+    used |= {p.attribut for m in projet.modes for c in m.canaux for p in c.plages if p.attribut}
+    defs = [_definition(a) for a in sorted(used)]
+    for d in list(defs):  # un sous-attribut a besoin de son attribut principal
+        main = d.get("MainAttribute")
+        if main and all(x["Name"] != main for x in defs):
+            defs.append(_definition(main))
     ad = ET.SubElement(ft, "AttributeDefinitions")
     ags = ET.SubElement(ad, "ActivationGroups")
     for ag in sorted({d["ActivationGroup"] for d in defs if d.get("ActivationGroup")}):
@@ -345,11 +735,40 @@ def construire(projet: Projet) -> FixtureType:
         for feat in feats:
             ET.SubElement(fg, "Feature", {"Name": feat})
     attrs = ET.SubElement(ad, "Attributes")
-    for d in defs:
+    for d in sorted(defs, key=lambda d: bool(d.get("MainAttribute"))):  # principaux d'abord
         ET.SubElement(attrs, "Attribute", d)
 
-    ET.SubElement(ft, "Wheels")
-    ET.SubElement(ft, "PhysicalDescriptions")
+    wheels = roues(projet)
+    media: dict[str, bytes] = {}  # images des emplacements, rangées comme dans une archive GDTF
+    we = ET.SubElement(ft, "Wheels")
+    for wheel, slots in wheels.items():
+        w = ET.SubElement(we, "Wheel", {"Name": wheel})
+        for slot in slots:
+            color = couleur_emplacement(slot) if wheel.startswith("ColorWheel") else "0.3127,0.3290,100.0"
+            se = ET.SubElement(w, "Slot", {"Name": slot, "Color": color})
+            png = projet.image(wheel, slot)
+            if png:
+                stem = re.sub(r"[^A-Za-z0-9]+", "_", f"{wheel}_{slot}").strip("_")
+                se.set("MediaFileName", stem)
+                media[f"wheels/{stem}.png"] = png
+
+    pd = ET.SubElement(ft, "PhysicalDescriptions")
+    em = ET.SubElement(pd, "Emitters")
+    emitter_of: dict[str, str] = {}
+    for key, (ename, x, y, wave) in EMETTEURS.items():
+        if f"ColorAdd_{key}" in used:
+            e = ET.SubElement(em, "Emitter", {"Name": ename, "Color": f"{x:.4f},{y:.4f},{_luminance(x, y):.1f}"})
+            if wave:
+                e.set("DominantWaveLength", str(wave))
+            emitter_of[f"ColorAdd_{key}"] = ename
+    fl = ET.SubElement(pd, "Filters")
+    filter_of: dict[str, str] = {}
+    for key, (fname, x, y, Y) in FILTRES.items():
+        if f"ColorSub_{key}" in used:
+            ET.SubElement(fl, "Filter", {"Name": fname, "Color": f"{x:.4f},{y:.4f},{Y:.1f}"})
+            filter_of[f"ColorSub_{key}"] = fname
+    ET.SubElement(pd, "ColorSpace", {"Mode": "sRGB"})
+
     ET.SubElement(ft, "Models")
     geos = ET.SubElement(ft, "Geometries")
     modes_el = ET.SubElement(ft, "DMXModes")
@@ -396,33 +815,82 @@ def construire(projet: Projet) -> FixtureType:
                 ref = ET.SubElement(nodes[HEAD], "GeometryReference",
                                     {"Name": f"{model} {k + 1}{suffix}", "Geometry": model})
                 ET.SubElement(ref, "Break", {"DMXOffset": str(first + k * span), "DMXBreak": "1"})
-        for c in sorted(mode.canaux, key=lambda c: c.adresse):
+
+        geo_of: dict[int, str] = {}
+        for c in mode.canaux:
             if c.copies > 1 and c.geometrie:
-                geo_name, shift = _clean(c.geometrie), firsts[c.geometrie] - 1
+                geo_of[id(c)] = _clean(c.geometrie)
             else:
-                key, shift = _geo_name(c), 0
+                key = _geo_name(c)
                 if key not in nodes:
                     nodes[key] = ET.SubElement(nodes[HEAD], "Geometry", {"Name": key + suffix})
-                geo_name = nodes[key].get("Name")
+                geo_of[id(c)] = nodes[key].get("Name")
+
+        for c in sorted(mode.canaux, key=lambda c: c.adresse):
+            geo_name = geo_of[id(c)]
+            shift = firsts[c.geometrie] - 1 if c.copies > 1 and c.geometrie else 0
             ce = ET.SubElement(chs, "DMXChannel", {
                 "DMXBreak": "1", "Offset": ",".join(str(a - shift) for a in c.adresses),
                 "Highlight": "None", "Geometry": geo_name,
             })
             lc = ET.SubElement(ce, "LogicalChannel", {"Attribute": c.attribut, "Snap": "No", "Master": "None"})
-            fn_name = (c.nom or c.attribut).strip()
-            cf = ET.SubElement(lc, "ChannelFunction", {
-                "Name": fn_name, "Attribute": c.attribut, "OriginalAttribute": c.nom.strip(),
-                "DMXFrom": "0/1", "Default": f"{max(0, min(255, c.defaut))}/1",
-                "PhysicalFrom": "0", "PhysicalTo": "1",
-            })
-            ce.set("InitialFunction", f"{geo_name}_{c.attribut}.{c.attribut}.{fn_name}")
-            for p in sorted(c.plages, key=lambda p: p.debut):
-                ET.SubElement(cf, "ChannelSet", {"Name": p.nom.strip(), "DMXFrom": f"{p.debut}/1"})
+            default = max(0, min(255, c.defaut))
+            fns = _fonctions(mode, c, notes)
+            plain = [f for f in fns if f["master"] is None]
+            initial = next((f for f in reversed(plain) if f["from"] <= default), fns[0])
+            wheel = roue_de(c.attribut)
+            slots = [s.lower() for s in wheels.get(wheel, [])]
+            for f in fns:
+                last = max((p.fin for p in f["plages"]), default=255)
+                inside = f["from"] <= default <= last or f is initial
+                cf = ET.SubElement(lc, "ChannelFunction", {
+                    "Name": f["name"], "Attribute": f["attr"], "OriginalAttribute": c.nom.strip(),
+                    "DMXFrom": f"{f['from']}/1", "Default": _dmx(c, default) if inside else f"{f['from']}/1",
+                })
+                lo, hi = f["phys"]
+                index = bool(slots) and f["attr"] == c.attribut
+                if lo is not None and hi is not None and not index:
+                    cf.set("PhysicalFrom", _num(lo))
+                    cf.set("PhysicalTo", _num(hi))
+                if wheel in wheels and roue_de(f["attr"]) == wheel:
+                    cf.set("Wheel", wheel)
+                if f["attr"] in emitter_of:
+                    cf.set("Emitter", emitter_of[f["attr"]])
+                if f["attr"] in filter_of:
+                    cf.set("Filter", filter_of[f["attr"]])
+                if f["master"] is not None:
+                    master, plage = f["master"]
+                    cf.set("ModeMaster", f"{geo_of[id(master)]}_{master.attribut}")
+                    cf.set("ModeFrom", f"{plage.debut}/1")
+                    cf.set("ModeTo", f"{plage.fin}/1")
+                select = bool(slots) and roue_de(f["attr"]) == wheel and "Select" in f["attr"]
+                for p in f["plages"]:
+                    label = nom_court(p.nom) if est_controle(c.attribut) else p.nom.strip()
+                    cs_el = ET.SubElement(cf, "ChannelSet", {"Name": label, "DMXFrom": f"{p.debut}/1"})
+                    low = p.nom.strip().lower()
+                    head = re.split(r"\s*,", low)[0]  # « Gobo 1, 360° slow → 10° fast »
+                    split = [x.strip() for x in re.split(r"\s*(?:→|->|>)\s*", low)]
+                    if index and low in slots:
+                        cs_el.set("WheelSlotIndex", str(slots.index(low) + 1))
+                    elif index and len(split) == 2 and all(x in slots for x in split):
+                        # entre deux emplacements : du centre du premier (0) au centre du suivant (1)
+                        cs_el.set("WheelSlotIndex", str(slots.index(split[0]) + 1))
+                        cs_el.set("PhysicalFrom", "0")
+                        cs_el.set("PhysicalTo", "1")
+                    elif select and head in slots:
+                        cs_el.set("WheelSlotIndex", str(slots.index(head) + 1))
+                    elif p.phys_de is not None and p.phys_a is not None and not index:
+                        cs_el.set("PhysicalFrom", _num(p.phys_de))
+                        cs_el.set("PhysicalTo", _num(p.phys_a))
+            ce.set("InitialFunction", f"{geo_name}_{c.attribut}.{c.attribut}.{initial['name']}")
 
     revs = ET.SubElement(ft, "Revisions")
     ET.SubElement(revs, "Revision", {"Text": f"Créé avec {APP_NAME}", "UserID": "0",
                                      "Date": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")})
-    return gdtf.parse_description(ET.tostring(root, encoding="utf-8", xml_declaration=True))
+    projet.notes = [n for n in projet.notes if n not in notes] + notes
+    built = gdtf.parse_description(ET.tostring(root, encoding="utf-8", xml_declaration=True))
+    built.extra_files.update(media)
+    return built
 
 
 def ecrire_gdtf(ft: FixtureType, path: Path) -> Path:
@@ -430,4 +898,6 @@ def ecrire_gdtf(ft: FixtureType, path: Path) -> Path:
     path = Path(path)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("description.xml", ET.tostring(ft.xml_root, encoding="utf-8", xml_declaration=True))
+        for name, data in ft.extra_files.items():
+            zf.writestr(name, data)
     return path

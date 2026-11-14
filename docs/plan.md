@@ -45,8 +45,30 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
    - « Créer le fixture » fabrique un vrai GDTF en mémoire (`creation.construire`) et l'ouvre dans
      l'atelier : arbre de géométries, puis export XML MA3 comme pour n'importe quel fixture.
    - Le projet en cours s'enregistre en `.bpot.json` pour être repris.
-   Reste : notices sans tableau tracé (texte seul), roues (gobos, couleurs) reliées aux plages,
-   plusieurs fonctions par canal (ModeMaster), test d'import onPC d'un fixture créé.
+   - « Tout récupérer » (Jo, 11/11/2026, après l'import du Muse dans onPC) : émetteurs LED et filtres
+     CMY reliés aux canaux, espace couleur, valeurs physiques (pan/tilt/zoom d'après le texte de la
+     notice, degrés / kelvins / % lus dans les plages), canal découpé en fonctions (Shutter1Strobe,
+     Color1WheelSpin, IrisPulseClose…), roues de couleurs et de gobos avec emplacements reliés aux
+     plages, lectures multiples d'un canal (ModeMaster : indexation ou rotation selon un autre
+     canal), tableaux annexes (« Control Channel », « Virtual colors ») rattachés à leur canal.
+     Les couleurs des émetteurs et des emplacements sont des valeurs TYPIQUES (`creation.EMETTEURS`,
+     `creation.COULEURS`) : les notices ne donnent pas de mesures.
+   Images des roues (`pdfimages.py`) : sur les pages « gobo / colour wheel », les images sont
+   rattachées aux emplacements par le texte voisin, sinon dans l'ordre ; elles vivent dans le projet
+   (`Projet.images`), l'archive GDTF (`wheels/`) et l'export MA3 (contenu intégré dans `GoboImage`,
+   vérifié dans onPC par Jo le 13/11/2026 ; les exports de la console ne portent que la référence au pool).
+   Dans « Créer » : boutons « Image… », « Inverser », « Retirer l'image » sur une plage de roue.
+   Chartes « empilées » (Martin, testé sur le MAC Viper Profile, 13/11/2026) : `pdfchart.lire_piles` lit
+   les tableaux à une case par canal (valeurs et libellés empilés, alignés par leur hauteur ; valeurs
+   16 bits ramenées à l'octet fort ; tableau de suite sur la page suivante). Canal d'index/rotation
+   piloté par plusieurs suites de plages du canal de sélection (`creation._maitres`). Noms des filtres
+   et des gobos repris de la notice (`nommer_emplacements`). Gobos dessinés en traits et repérés par
+   une rangée de numéros : rendus en image, papier remis en noir (`pdfimages._figures`).
+   Physique lue dans le texte : points de conduite (« Pan . . . 540° »), strobe « 2 Hz to 10 Hz »,
+   zoom « Flood → spot », CTO « 6000 K → 3200 K ».
+   Reste : notices sans tableau tracé (texte seul), gobos dessinés en traits (vectoriels),
+   fréquences de strobe quand la notice ne les donne pas, gélatines par catégorie (Muse : 11 tableaux), poids / puissance,
+   test d'import onPC.
 
 ## Points à vérifier sur le matériel de Jo
 
@@ -61,6 +83,9 @@ Proposé le 31/10/2026 (modifiable). Appli de bureau, usage personnel, grandMA3 
 - [ ] Import onPC d'un fixture créé de zéro (Muse Fresnel70CT+ : attributs proposés, plages).
 - [ ] Connexion GDTF Share réelle (non testable depuis l'environnement de dev).
 - [ ] Comment MA3 2.3.2.0 affiche un dimmer virtuel ajouté dans un GDTF.
+- [ ] Atelier sur un XML MA3 (13/11/2026, Quantum Wash de Jo) : regrouper, changer en référence et une base
+  par mode écrivent le format console (PosX…, Break DMXPatch, Coarse/Fine, chemins pointés, modèles en tête).
+  À confirmer à l'import onPC.
 - [x] Axis : une tête seule se fond dans l'instance principale (iTetra2) ; plusieurs têtes
   (12 tilts, copiées ou en références) = autant d'instances (confirmé par Jo, 10/11/2026).
 - [x] iTetra2 : un mode choisit le Break d'une référence par ses canaux (`DMXBreak="1"` →

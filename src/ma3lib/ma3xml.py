@@ -373,8 +373,13 @@ def _wheels(ctx: _Ctx, src: Optional[ET.Element], out: ET.Element) -> None:
                 # comme la console : la référence au média du pool Gobos, sans le contenu
                 stem = f"[{ctx.name}_{media}_png]"
                 dep = _dependency(se, "ShowData.MediaPools.Gobos", f"'{stem}'")
-                _el(dep, "GoboImage", {"Name": stem, "Guid": _stable_guid(f"{ctx.name}/gobo/{media}"),
-                                       "FileName": f"{ctx.name}_{media}.png"})
+                gi = _el(dep, "GoboImage", {"Name": stem, "Guid": _stable_guid(f"{ctx.name}/gobo/{media}"),
+                                            "FileName": f"{ctx.name}_{media}.png"})
+                # image fournie avec le fixture (archive GDTF, section « Créer ») : contenu intégré comme
+                # pour la vignette, sinon la console n'a rien à afficher pour un fixture qu'elle ne connaît pas
+                path = _find_file(ctx.files, "wheels", media, ("png",))
+                if path:
+                    _media_block(gi, ctx.files[path])
             for facet in s.iterfind("Facet"):
                 _el(se, "Facet", {"Color": color_ma3(facet.get("Color")), "Rotation": facet.get("Rotation")})
             for extra in s:
@@ -607,7 +612,9 @@ def _channel_function(ctx: _Ctx, cf: ET.Element, parent: ET.Element, virtual: bo
     pf, pt = _num(cf.get("PhysicalFrom"), 0.0), _num(cf.get("PhysicalTo"), 1.0)
     unit = ctx.units.get(attrs["Attribute"] or "", "")
     scale = math.pi / 180 if unit == "AngularSpeed" else 1.0  # la console stocke des rad/s
-    pf, pt = pf * scale, pt * scale
+    # physique absente du GDTF : valeurs d'usage de la console (0 à 1), sans conversion d'unité
+    pf = pf * scale if cf.get("PhysicalFrom") is not None else pf
+    pt = pt * scale if cf.get("PhysicalTo") is not None else pt
     if cf.get("Wheel") and unit in ("", "None"):
         # index de roue : la console compte en emplacements (0 … nombre de slots)
         pf, pt = 0.0, float(ctx.slots.get(cf.get("Wheel", ""), 1))
@@ -634,6 +641,9 @@ def _channel_function(ctx: _Ctx, cf: ET.Element, parent: ET.Element, virtual: bo
         v = dmx_value(cs.get("DMXFrom"))
         if v != "000000":
             sa["DMXFrom"] = v
+        wsi = cs.get("WheelSlotIndex")
+        if wsi not in (None, "0", "-2147483648"):
+            sa["WheelSlotIndex"] = wsi
         if cs.get("PhysicalFrom") is not None or cs.get("PhysicalTo") is not None:
             cpf, cpt = _num(cs.get("PhysicalFrom"), 0.0) * scale, _num(cs.get("PhysicalTo"), 1.0) * scale
             if cpf != 0.0:
@@ -641,9 +651,12 @@ def _channel_function(ctx: _Ctx, cf: ET.Element, parent: ET.Element, virtual: bo
             if cpt != 1.0:
                 sa["PhysicalTo"] = _f(str(cpt), 4)
             sa["HasPhysical"] = "Yes"
-        wsi = cs.get("WheelSlotIndex")
-        if wsi not in (None, "0", "-2147483648"):
-            sa["WheelSlotIndex"] = wsi
+        elif "WheelSlotIndex" in sa and cf.get("Wheel") and unit in ("", "None"):
+            # emplacement fixe, comme dans les exports de la console (Esprite) : physique 0 à 0, relative au
+            # centre de l'emplacement. Sans elle, onPC 2.3.2.0 déduit l'emplacement en répartissant la plage
+            # DMX de la fonction et l'image affichée est décalée (Jo, 13/11/2026).
+            sa["PhysicalTo"] = "0.0000"
+            sa["HasPhysical"] = "Yes"
         _el(e, "ChannelSet", sa)
     for sub in cf:
         if sub.tag != "ChannelSet":

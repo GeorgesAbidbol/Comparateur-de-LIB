@@ -194,7 +194,7 @@ def test_mini_grid_keeps_16_pixels_on_one_row(tmp_path):
     grid.set(ft.geometry("Array 120"), ft)
     assert grid.cells == [(i, 0) for i in range(16)] and grid.current == (11, 0)
     cols, rows, size = grid.layout()
-    assert (cols, rows) == (16, 1) and cols * size <= 380
+    assert (cols, rows) == (17, 2) and cols * size <= 380  # + 1 colonne et 1 ligne vides pour glisser
     grid.grab()
 
 
@@ -497,3 +497,198 @@ def test_dmx_chart_correction_in_atelier(bad_bar, monkeypatch):
     assert rows("Body") == []
     win.undo()
     assert rows("Body") == [("Shutter1", [13])]
+
+
+def test_creer_image_d_emplacement_de_roue(tmp_path):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from ma3lib.creation import Canal, Mode, Plage, Projet
+    from ma3lib.gui.creer import CreerPage
+    page = CreerPage()
+    page.set_projet(Projet("T", "G", "", [Mode("M", [
+        Canal(1, nom="Gobo", attribut="Gobo1", plages=[Plage(0, 9, "Open"), Plage(10, 19, "Star")])])]))
+    img = QImage(600, 300, QImage.Format_RGB32)
+    img.fill(0xFFFFFFFF)
+    img.save(str(tmp_path / "star.png"))
+    page.table.selectRow(0)
+    page.ranges.selectRow(1)
+    page.choose_image(str(tmp_path / "star.png"))
+    png = page.projet.image("GoboWheel 1", "Star")
+    assert png and QImage.fromData(png).width() == 256  # réduite
+    assert not page.ranges.item(1, 2).icon().isNull()
+    page.ranges.selectRow(1)
+    page.invert_image()
+    assert QImage.fromData(page.projet.image("GoboWheel 1", "Star")).pixelColor(3, 3).red() == 0
+    page.ranges.item(1, 2).setText("Etoile")  # l'image suit le nom
+    assert page.projet.image("GoboWheel 1", "Etoile") and not page.projet.image("GoboWheel 1", "Star")
+    page.ranges.selectRow(1)
+    page.set_image(None)
+    assert not page.projet.images
+
+
+def test_atelier_retirer_3d_propose_une_base_par_mode(tmp_path, _no_message_boxes):
+    """Aura XIP de Jo (13/11/2026) : arbre partagé, anneaux sans canal en Basic mais utilisés en
+    Extended -> « Retirer la 3D » propose de séparer les modes, et un refus s'affiche en fenêtre."""
+    from PySide6.QtWidgets import QApplication
+    from ma3lib.gui.atelier import AtelierWindow
+    from test_geotree import _ma3_wash
+
+    app = QApplication.instance() or QApplication([])
+    ft = _ma3_wash(tmp_path)
+    win = AtelierWindow()
+    win.load(str(ft.source), "Basic")
+    app.processEvents()
+    assert {"Ring 1", "Ring 2", "Ring 3"} <= win.useless  # sans canal dans ce mode
+    assert win.strip_button.isEnabled() and win.split_button.isEnabled()
+    win.strip_3d()
+    assert _no_message_boxes[-1][0] == "question"
+    assert [m.geometry for m in win.ft.modes] == ["Base Basic", "Base Extended"]
+    assert win.ft.geometry("Ring 1 Basic") is None and win.ft.geometry("Ring 1 Extended") is not None
+    win.split_per_mode()  # plus rien à séparer : on le dit
+    assert _no_message_boxes[-1][0] == "information"
+    win._apply(lambda ft: (_ for _ in ()).throw(__import__("ma3lib.geotree").geotree.MoveError("essai")))
+    assert _no_message_boxes[-1] == ("warning", "Essai") and "Impossible : essai" in win.status.text()
+    win.undo()
+    assert win.ft.mode("Basic").geometry == "Base"
+    win.close()
+
+
+def test_params_grille_z(tmp_path):
+    from PySide6.QtWidgets import QApplication
+    from ma3lib.gui.atelier import AtelierWindow
+    from test_geotree import _ma3_wash
+
+    app = QApplication.instance() or QApplication([])
+    ft = _ma3_wash(tmp_path)
+    win = AtelierWindow()
+    win.load(str(ft.source), "Extended")
+    win._select(win.ft.geometry("Ring 3"))
+    win.params.geo = win.ft.geometry("Ring 3")
+    p = win.params
+    assert p.gy.value() == 2 and p.gz.value() == 0
+    assert not p.auto.isChecked() and p.gz.isEnabled()  # anneaux en GridAuto="Manual"
+    p.gz.setValue(4)
+    e = p.edit()
+    assert e.grid == (0, 2, 4) and e.grid_auto is None
+    new, _ = atelier_geotree().apply_edit(win.ft, win.ft.geometry("Ring 3"), e)
+    assert atelier_geotree().element_of(new, new.geometry("Ring 3")).get("GridZ") == "4"
+    p.auto.setChecked(True)  # Auto : X/Y/Z grisés, la console place
+    assert not p.gz.isEnabled()
+    e = p.edit()
+    assert e.grid is None and e.grid_auto is True
+    new2, _ = atelier_geotree().apply_edit(new, new.geometry("Ring 3"), e)
+    assert atelier_geotree().element_of(new2, new2.geometry("Ring 3")).get("GridAuto") == "Auto"
+    win.close()
+
+
+def atelier_geotree():
+    from ma3lib import geotree
+    return geotree
+
+
+def test_zone_geometries_disponibles(tmp_path, good_bar, monkeypatch):
+    """Jo (13/11/2026) : à droite, créer ou importer une géométrie puis la poser dans l'arbre ;
+    la petite grille se glisse."""
+    from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
+    from ma3lib.gui import atelier
+    from ma3lib.gui.atelier import AtelierWindow
+    from test_geotree import _ma3_wash
+
+    app = QApplication.instance() or QApplication([])
+    ft = _ma3_wash(tmp_path)
+    win = AtelierWindow()
+    win.load(str(ft.source), "Extended")
+    win.show()
+    app.processEvents()
+    bank = win.bank
+    assert win.split.count() == 2 and win.split.widget(1) is bank  # création à droite
+    bank.name.setText("Pixel")
+    bank.kind.setCurrentText("Beam")
+    bank.mesh.setCurrentText("Cube")
+    bank._create()
+    assert [p.name for p in bank.pieces] == ["Pixel"]
+    win.tree.current = win.ft.geometry("Head")
+    win._add_piece_here(0)
+    g = win.ft.geometry("Pixel")
+    assert g is not None and g.parent.name == "Head" and g.model == "Cube"
+    assert "posée sous « Head »" in win.status.text()
+    win.tree.pieceDropped.emit(0, win.ft.geometry("Head"), 0)  # même chose en glissant : « Pixel 2 »
+    assert win.ft.geometry("Head").children[0].name == "Pixel 2"
+    win.undo()
+    assert win.ft.geometry("Pixel 2") is None and win.ft.geometry("Pixel") is not None
+    # importer d'un GDTF
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(good_bar), ""))
+    monkeypatch.setattr(atelier.ImportDialog, "exec", lambda self: QDialog.Accepted)
+    monkeypatch.setattr(atelier.ImportDialog, "chosen", lambda self: [x for x in self.items if x.name == "Body"])
+    win._import_pieces()
+    assert bank.pieces[-1].source.startswith("importée") and bank.pieces[-1].count == 5
+    win.tree.pieceDropped.emit(1, win.ft.geometry("Base"), 0)
+    assert [c.name for c in win.ft.geometry("Body").children] == [f"Pixel{i}" for i in range(1, 5)]
+    # petite grille : on glisse la case jaune
+    ring = win.ft.geometry("Ring 2")
+    win.tree.current = ring
+    win._select(ring)
+    win.params.grid.placed.emit(3, 1)
+    el = atelier.geotree.element_of(win.ft, win.ft.geometry("Ring 2"))
+    assert (el.get("GridAuto"), el.get("GridX"), el.get("GridY")) == ("Manual", "3", "1")
+    win.close()
+
+
+def test_double_clic_montre_tous_les_canaux(tmp_path, monkeypatch):
+    """Jo (13/11/2026) : double-clic sur Head = tous les canaux contenus, repatchables (XML MA3)."""
+    from PySide6.QtWidgets import QApplication, QDialog
+    from ma3lib.gui import atelier
+    from test_geotree import _ma3_wash
+
+    app = QApplication.instance() or QApplication([])
+    ft = _ma3_wash(tmp_path)
+    win = atelier.AtelierWindow()
+    win.load(str(ft.source), "Extended")
+    head = win.ft.geometry("Head")
+    dlg = atelier.EditDialog(win.ft, head, "Extended", win,
+                             lambda: atelier.charte_dmx.lignes(win.ft, "Extended", win.ft.geometry("Head")),
+                             win._edit_channel)
+    texts = dlg.channel_texts()
+    # seulement les canaux de Head, pas ceux de ses enfants (Jo)
+    assert len(texts) == 1 and texts[0].startswith("3") and "Tilt" in texts[0]
+    monkeypatch.setattr(atelier.ChannelDialog, "exec", lambda self: QDialog.Accepted)
+    monkeypatch.setattr(atelier.ChannelDialog, "values", lambda self: ("Tilt", [20], ""))
+    dlg._channel_asked("Head", "Tilt")
+    rows = atelier.charte_dmx.lignes(win.ft, "Extended", win.ft.geometry("Head"))
+    assert [r.offsets for r in rows] == [[20]]
+    # ajouter puis retirer un Dimmer virtuel (Jo) depuis la même fenêtre
+    monkeypatch.setattr(atelier.ChannelDialog, "values", lambda self: ("Dimmer", [], ""))
+    dlg._channel_asked("Head", "")
+    assert any(t.startswith("virtuel  Dimmer") for t in dlg.channel_texts())
+    dlg.channels.setCurrentCell([t.startswith("virtuel") for t in dlg.channel_texts()].index(True), 0)
+    dlg._remove_clicked()
+    assert not any("Dimmer" in t for t in dlg.channel_texts())
+    assert any(t.startswith("20 ") for t in dlg.channel_texts())
+    dlg.close()
+    win.close()
+
+
+def test_gdtf_share_erreur_reseau_expliquee_en_fenetre(_no_message_boxes):
+    """Jo, 14/11/2026 : la connexion échouait sans explication claire."""
+    import requests
+    from PySide6.QtWidgets import QApplication
+    from ma3lib import gdtf_share
+    from ma3lib.gui import share
+
+    app = QApplication.instance() or QApplication([])
+
+    class Down:
+        def __init__(self, *a):
+            pass
+
+        def login(self):
+            raise requests.exceptions.ConnectionError("Name or service not known")
+
+    page = share.SharePage(client_factory=Down)
+    page.user.setText("jo@example.com")
+    page.password.setText("x")
+    assert not page.connect_account()
+    assert _no_message_boxes and _no_message_boxes[-1][0] == "warning"
+    assert "pas de connexion au site" in page.status.text()
+    assert "certificat" in gdtf_share.explain(requests.exceptions.SSLError("CERTIFICATE_VERIFY_FAILED"))

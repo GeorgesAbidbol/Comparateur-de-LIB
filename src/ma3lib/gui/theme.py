@@ -25,6 +25,49 @@ LEGEND = [
     ("bleu", "Virtuel"),
 ]
 
+
+def _png(width: int, height: int, pixels) -> bytes:
+    """PNG RGBA minimal (sans Qt : le style est construit avant l'application)."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    raw = b"".join(b"\0" + bytes(c for x in range(width) for c in pixels(x, y)) for y in range(height))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+def _arrow_files() -> dict[str, str]:
+    """Petits triangles des flèches haut/bas des cases à chiffres (Qt ne les dessine plus dès
+    qu'on stylise la case). Écrits une fois dans le dossier temporaire."""
+    import os
+    import tempfile
+    folder = os.path.join(tempfile.gettempdir(), "banane-pot-ui")
+    os.makedirs(folder, exist_ok=True)
+    w, h = 20, 12  # dessinés en double taille, affichés en 10x6
+    out = {}
+    for name, color in (("", TEXT), ("_off", TEXT_DIM)):
+        rgb = (color.red(), color.green(), color.blue())
+        for way in ("up", "down"):
+            def px(x, y, way=way):
+                row = (h - 1 - y) if way == "up" else y  # 0 = côté large
+                half = (w / 2) * (1 - row / h)
+                inside = abs(x + 0.5 - w / 2) <= half
+                return (*rgb, 255 if inside else 0)
+            path = os.path.join(folder, f"{way}{name}.png")
+            try:
+                with open(path, "wb") as f:
+                    f.write(_png(w, h, px))
+            except OSError:
+                pass
+            out[way + name] = path.replace("\\", "/")
+    return out
+
+
+_ARROWS = _arrow_files()
+
 STYLE = f"""
 QWidget {{ background: {BG.name()}; color: {TEXT.name()}; }}
 QPushButton {{ background: {ROW.name()}; border: none; border-radius: 6px;
@@ -39,6 +82,16 @@ QScrollBar:vertical {{ background: {BG.name()}; width: 10px; }}
 QScrollBar::handle:vertical {{ background: {ROW_HOVER.name()}; border-radius: 5px; min-height: 30px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
 QLabel#dim {{ color: {TEXT_DIM.name()}; }}
+QAbstractSpinBox {{ padding-right: 24px; }}
+QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{
+    subcontrol-origin: border; width: 22px; border: none; background: {ROW_HOVER.name()}; }}
+QAbstractSpinBox::up-button {{ subcontrol-position: top right; border-top-right-radius: 6px; }}
+QAbstractSpinBox::down-button {{ subcontrol-position: bottom right; border-bottom-right-radius: 6px; }}
+QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover {{ background: {HEADER.name()}; }}
+QAbstractSpinBox::up-arrow {{ image: url({_ARROWS["up"]}); width: 10px; height: 6px; }}
+QAbstractSpinBox::down-arrow {{ image: url({_ARROWS["down"]}); width: 10px; height: 6px; }}
+QAbstractSpinBox::up-arrow:disabled, QAbstractSpinBox::up-arrow:off {{ image: url({_ARROWS["up_off"]}); }}
+QAbstractSpinBox::down-arrow:disabled, QAbstractSpinBox::down-arrow:off {{ image: url({_ARROWS["down_off"]}); }}
 QMenu {{ background: {ROW.name()}; padding: 4px; }}
 QMenu::item:selected {{ background: {HEADER.name()}; }}
 """

@@ -89,7 +89,8 @@ des adresses déjà prises). Sous l'arbre du mode, ses **modèles** (« modèle 
 leurs références (ex. pixels rangés sous le master une fois pour A et B). On range à
 l'intérieur d'un même arbre. **Double-clic** : popup nom / type / adresse (un champ par jeu
 d'adresses d'une référence, ou premier canal dans le mode) / grille (proposée d'après la 3D).
-Regrouper, fusionner et dupliquer : GDTF seulement pour l'instant.
+Regrouper, changer en référence, dupliquer et « Une base par mode » marchent aussi sur un XML MA3
+(fichier exporté de la console). Fusionner, la charte DMX et l'import de mesh : GDTF seulement pour l'instant.
 
 ## Lancer sous Windows
 
@@ -122,6 +123,13 @@ Section **Créer** de l'appli. Deux façons de partir, qui se combinent :
   Pour des pixels ou des têtes identiques, saisir les canaux de la première instance, leur donner
   un nom de géométrie (ex. `Pixel`) et un nombre de **copies** : on obtient un modèle + N
   références aux adresses qui se suivent.
+
+Ce qui est repris de la notice ou déduit : émetteurs LED et filtres CMY, espace couleur, valeurs
+physiques (colonnes « Phys. »), fonctions par plage (strobe, pulse, rotation de roue…), roues de
+couleurs et de gobos. Les couleurs d'émetteurs et d'emplacements sont des valeurs typiques.
+Les **images de gobos et de roue de couleurs** présentes dans la notice sont posées sur les
+emplacements (vignette devant le nom de la plage). Pour en mettre une à la main : sélectionner le
+canal de roue, la plage, puis « Image… » ; « Inverser » échange noir et blanc.
 
 « Créer le fixture → Atelier » ouvre le résultat dans l'atelier (géométries, puis « Exporter… »
 en XML MA3). « Enregistrer le projet… » garde la saisie (`.bpot.json`).

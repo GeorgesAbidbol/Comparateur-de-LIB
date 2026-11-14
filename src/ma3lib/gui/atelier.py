@@ -16,11 +16,12 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
-from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-                               QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QPushButton,
-                               QScrollArea, QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtCore import QMimeData, QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QDrag, QKeySequence, QPainter, QPen, QShortcut
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+                               QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
+                               QAbstractItemView, QHeaderView, QScrollArea, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
+                               QVBoxLayout, QWidget)
 
 from .. import charte_dmx, compare, diagnostic, gdtf, geotree
 from ..gdtf import FixtureType, Geometry
@@ -35,6 +36,7 @@ INDENT = 20
 MARGIN = 12
 TYPES = ["Geometry", "Beam", "Axis", "GeometryReference", "FilterColor", "FilterGobo", "Display"]
 BADGE = {"Geometry": "GEO", "Beam": "BEAM", "Axis": "AXIS", "GeometryReference": "RÉF"}
+PIECE_MIME = "application/x-banane-pot-geometrie"  # glisser une géométrie disponible dans l'arbre
 
 
 @dataclass
@@ -50,6 +52,7 @@ class GeoTree(QWidget):
     dropped = Signal(list, object, int)  # géométries, nouveau parent, rang
     menuAsked = Signal(object)  # position globale du clic droit
     editAsked = Signal(object)  # double-clic : popup des paramètres
+    pieceDropped = Signal(int, object, int)  # géométrie disponible n°, parent, rang
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -72,6 +75,8 @@ class GeoTree(QWidget):
         self._press_row: Optional[_Row] = None
         self._dragging = False
         self._drop: Optional[tuple[_Row, str]] = None  # (ligne visée, "avant" / "dans" / "après")
+        self._drag_label = ""  # nom affiché pendant un glisser venu de la zone de droite
+        self.setAcceptDrops(True)
 
     def set_root(self, root, useless: set[str], doubles: set[str],
                  idents: Optional[dict[str, str]] = None, copies: Optional[dict[str, int]] = None,
@@ -225,7 +230,8 @@ class GeoTree(QWidget):
             n = len(self.selection)
             p.setPen(theme.ACCENT)
             p.setFont(theme.font(9, True))
-            p.drawText(self._drag_pos + QPointF(14, -6), f"{n} géométrie(s)" if n > 1 else self.selection[0].name)
+            label = self._drag_label or (f"{n} géométrie(s)" if n > 1 else self.selection[0].name)
+            p.drawText(self._drag_pos + QPointF(14, -6), label)
 
     def _row_at(self, pos) -> Optional[_Row]:
         return next((r for r in self._rows if r.rect.contains(pos)), None)
@@ -274,7 +280,7 @@ class GeoTree(QWidget):
         if r and e.button() == Qt.LeftButton and e.position().x() >= r.rect.left() + 24:
             self.editAsked.emit(r.geo)
 
-    def _drop_at(self, pos) -> Optional[tuple[_Row, str]]:
+    def _drop_at(self, pos, geos: Optional[list] = None) -> Optional[tuple[_Row, str]]:
         r = self._row_at(pos) or next((x for x in self._rows
                                         if x.rect.top() - GAP_Y <= pos.y() <= x.rect.bottom() + GAP_Y), None)
         if r is None:
@@ -284,9 +290,42 @@ class GeoTree(QWidget):
         if r.geo.parent is None or (zone == "dans" and r.geo.is_reference):
             zone = "dans"
         parent, _ = self._target(r, zone)
-        if parent is None or any(geotree.check(g, parent) for g in self.selection):
+        moving = self.selection if geos is None else geos
+        if parent is None or parent.is_reference or any(geotree.check(g, parent) for g in moving):
             return None
         return r, zone
+
+    # glisser une géométrie disponible (zone de droite) dans l'arbre
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasFormat(PIECE_MIME):
+            e.acceptProposedAction()
+
+    def dragMoveEvent(self, e):
+        if not e.mimeData().hasFormat(PIECE_MIME):
+            return
+        self._drop = self._drop_at(e.position(), [])
+        self._dragging = self._drop is not None
+        self._drag_pos = e.position()
+        self._drag_label = e.mimeData().text()
+        e.setAccepted(self._drop is not None)
+        self.update()
+
+    def dragLeaveEvent(self, e):
+        self._dragging, self._drop, self._drag_label = False, None, ""
+        self.update()
+
+    def dropEvent(self, e):
+        drop = self._drop_at(e.position(), []) if e.mimeData().hasFormat(PIECE_MIME) else None
+        self._dragging, self._drop, self._drag_label = False, None, ""
+        self.update()
+        if drop is None:
+            return
+        row, zone = drop
+        parent, index = self._target(row, zone)
+        if zone == "dans":
+            self.collapsed.discard(row.geo.name)
+        e.acceptProposedAction()
+        self.pieceDropped.emit(int(bytes(e.mimeData().data(PIECE_MIME)).decode()), parent, index)
 
     @staticmethod
     def _target(r: _Row, zone: str) -> tuple[Optional[Geometry], int]:
@@ -347,15 +386,43 @@ def grid_place(g: Geometry, ft=None) -> tuple[int, int]:
     return geotree.grid_proposal(g, ft)
 
 
+def grid_auto(g: Geometry, ft=None) -> bool:
+    """GridAuto : « Auto » (ou absent) = la console place la géométrie dans la grille."""
+    el = geotree.element_of(ft, g) if ft is not None else None
+    return el is None or el.get("GridAuto", "Auto") != "Manual"
+
+
+def _auto_box(spins) -> "QCheckBox":
+    """Case « Auto » de la grille : cochée, X/Y/Z sont grisés (la console place)."""
+    box = QCheckBox("Auto")
+    box.setToolTip("Cochée : la console place la géométrie dans la grille (GridAuto=Auto).\n"
+                   "Décochée : X, Y, Z à la main (GridAuto=Manual).")
+    box.toggled.connect(lambda on: [s.setEnabled(not on) for s in spins])
+    return box
+
+
+def grid_z(g: Geometry, ft=None) -> int:
+    """GridZ écrit dans le fichier (0 sinon) : la grille MA3 a trois axes."""
+    el = geotree.element_of(ft, g) if ft is not None else None
+    try:
+        return int(el.get("GridZ") or 0) if el is not None else 0
+    except ValueError:
+        return 0
+
+
 class MiniGrid(QWidget):
     """Grille façon Fixture Hero : les géométries sœurs à leur vraie place, la choisie en jaune.
     16 pixels en ligne = une seule ligne de 16 (Jo, 11/11/2026), jamais de retour à la ligne."""
+
+    placed = Signal(int, int)  # case jaune glissée : nouvelle place X, Y
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.cells: list[tuple[int, int]] = []
         self.current: Optional[tuple[int, int]] = None
+        self._hold: Optional[tuple[int, int]] = None  # case visée pendant le glisser
         self.setMinimumHeight(170)
+        self.setToolTip("Glisse la case jaune pour placer la géométrie (grille à la main)")
 
     def set(self, geo: Optional[Geometry], ft=None) -> None:
         sibs = geo.parent.children if geo and geo.parent else ([geo] if geo else [])
@@ -364,11 +431,43 @@ class MiniGrid(QWidget):
         self.update()
 
     def layout(self) -> tuple[int, int, float]:
-        """Colonnes, lignes et taille d'une case : les cases rétrécissent pour tout faire tenir."""
-        cols = max(x for x, _ in self.cells) + 1
-        rows = max(y for _, y in self.cells) + 1
+        """Colonnes, lignes et taille d'une case : les cases rétrécissent pour tout faire tenir.
+        Une colonne et une ligne vides en plus, pour pouvoir y glisser la case jaune."""
+        cols = max(x for x, _ in self.cells) + 2
+        rows = max(y for _, y in self.cells) + 2
         size = min(26.0, (self.width() - 20) / cols, (self.height() - 20) / rows)
         return cols, rows, max(size, 2.0)
+
+    def _origin(self) -> tuple[float, float, float]:
+        cols, rows, size = self.layout()
+        return (self.width() - cols * size) / 2, (self.height() - rows * size) / 2, size
+
+    def _cell_at(self, pos) -> Optional[tuple[int, int]]:
+        if not self.cells:
+            return None
+        cols, rows, _ = self.layout()
+        x0, y0, size = self._origin()
+        cx, cy = int((pos.x() - x0) // size), int((pos.y() - y0) // size)
+        return (cx, cy) if 0 <= cx < cols and 0 <= cy < rows else None
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self.current is not None and self._cell_at(e.position()) == self.current:
+            self._hold = self.current
+            self.setCursor(Qt.ClosedHandCursor)
+
+    def mouseMoveEvent(self, e):
+        if self._hold is not None:
+            self._hold = self._cell_at(e.position()) or self._hold
+            self.update()
+
+    def mouseReleaseEvent(self, e):
+        if self._hold is not None:
+            cell, self._hold = self._hold, None
+            self.unsetCursor()
+            if cell != self.current:
+                self.current = cell
+                self.placed.emit(*cell)
+            self.update()
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -377,13 +476,16 @@ class MiniGrid(QWidget):
             return
         cols, rows, size = self.layout()
         gap = 3 if size >= 10 else 1
-        x0 = (self.width() - cols * size) / 2
-        y0 = (self.height() - rows * size) / 2
+        x0, y0, size = self._origin()
         for cell in sorted(set(self.cells), key=lambda c: c == self.current):
             on = cell == self.current
             p.setPen(QPen(theme.ACCENT if on else theme.ROW_HOVER, 2 if size >= 10 else 1))
             p.setBrush(theme.ACCENT if on else theme.BG)
             p.drawRect(QRectF(x0 + cell[0] * size, y0 + cell[1] * size, size - gap, size - gap))
+        if self._hold is not None and self._hold != self.current:  # où la case jaune va tomber
+            p.setPen(QPen(theme.ACCENT, 2, Qt.DashLine))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(QRectF(x0 + self._hold[0] * size, y0 + self._hold[1] * size, size - gap, size - gap))
 
 
 NEW_MODEL = "Nouveau modèle…"
@@ -402,7 +504,8 @@ class Params(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.geo: Optional[Geometry] = None
-        self.place = (0, 0)
+        self.place = (0, 0, 0)
+        self._auto0 = True
         self.title = QLabel()
         self.title.setFont(theme.font(12, True))
         self.name = QLineEdit()
@@ -420,10 +523,12 @@ class Params(QWidget):
         self.address.setRange(1, 512)
         self.brk = QLabel()
         self.brk.setObjectName("dim")
-        self.gx, self.gy = QSpinBox(), QSpinBox()
-        for s in (self.gx, self.gy):
+        self.gx, self.gy, self.gz = QSpinBox(), QSpinBox(), QSpinBox()
+        for s in (self.gx, self.gy, self.gz):
             s.setRange(0, 999)
+        self.auto = _auto_box((self.gx, self.gy, self.gz))
         self.grid = MiniGrid()
+        self.grid.placed.connect(self._placed)
         self.note = QLabel()
         self.note.setWordWrap(True)
         self.note.setObjectName("dim")
@@ -456,11 +561,16 @@ class Params(QWidget):
         addr.addWidget(self.brk, 1)
         form.addRow("Adresse", addr)
         grid = QHBoxLayout()
+        grid.addWidget(self.auto)
+        grid.addSpacing(6)
         grid.addWidget(QLabel("X"))
         grid.addWidget(self.gx)
         grid.addSpacing(8)
         grid.addWidget(QLabel("Y"))
         grid.addWidget(self.gy)
+        grid.addSpacing(8)
+        grid.addWidget(QLabel("Z"))
+        grid.addWidget(self.gz)
         form.addRow("Grille", grid)
 
         lay = QVBoxLayout(self)
@@ -482,7 +592,7 @@ class Params(QWidget):
         lay.addWidget(self.note)
         lay.addStretch(1)
         self.setStyleSheet(f"QLineEdit, QSpinBox {{ background: {theme.ROW.name()}; border: none;"
-                           f" border-radius: 6px; padding: 6px 10px; }}"
+                           f" border-radius: 6px; padding: 6px 24px 6px 10px; }}"
                            f"QSpinBox:disabled {{ color: {theme.TEXT_DIM.name()}; }}"
                            f"QListWidget {{ background: {theme.PANEL.name()}; border: none; border-radius: 8px;"
                            f" padding: 4px; outline: none; }}"
@@ -513,6 +623,13 @@ class Params(QWidget):
             item.setData(Qt.UserRole, r.attribute)
             self.channels.addItem(item)
         self._chan_buttons()
+
+    def _placed(self, x: int, y: int) -> None:
+        """Case jaune glissée dans la petite grille : grille à la main, X/Y, appliqué tout de suite."""
+        self.auto.setChecked(False)
+        self.gx.setValue(x)
+        self.gy.setValue(y)
+        self.applied.emit()
 
     def _kind_changed(self, kind: str) -> None:
         self.model.setEnabled(kind == REF)
@@ -548,11 +665,20 @@ class Params(QWidget):
         self.model.setEnabled(g.is_reference)
         b = g.breaks[0] if g.breaks else None
         self.address.setEnabled(b is not None)
+        self.address.setVisible(b is not None)  # sans adresse propre : seulement l'explication
         self.address.setValue(b.dmx_offset if b else 1)
-        self.brk.setText(f"Break {b.dmx_break}" if b else ("sans adresse" if g.is_reference else "portée par les canaux"))
-        self.place = grid_place(g, ft)
+        self.brk.setText(f"Break {b.dmx_break}" if b else ("sans adresse" if g.is_reference else
+                                                           "patch dans DMX mode"))
+        self.brk.setToolTip("" if b else "Seule une référence a sa propre adresse (son Break). Une géométrie "
+                            "n'en a pas : ce sont ses canaux qui ont des numéros dans le mode. Pour les décaler, "
+                            "double-clic sur la ligne : « premier canal ».")
+        self.place = (*grid_place(g, ft), grid_z(g, ft))
         self.gx.setValue(self.place[0])
         self.gy.setValue(self.place[1])
+        self.gz.setValue(self.place[2])
+        self._auto0 = grid_auto(g, ft)
+        self.auto.setChecked(not self._auto0)  # force le signal pour griser X/Y/Z
+        self.auto.setChecked(self._auto0)
         self.grid.set(g, ft)
         self.note.setText("Aucun canal dans aucun mode : sert seulement à la 3D, le nettoyeur "
                           "la retirera." if flag_3d else "")
@@ -569,8 +695,13 @@ class Params(QWidget):
         mesh = "" if self.mesh.currentText() == NO_MESH else self.mesh.currentText()
         if not g.is_reference and mesh != g.model and mesh != OTHER_GDTF:
             e.mesh = mesh
-        if (self.gx.value(), self.gy.value()) != self.place:
-            e.grid = (self.gx.value(), self.gy.value())
+        auto = self.auto.isChecked()
+        if not auto and (self.gx.value(), self.gy.value(), self.gz.value()) != self.place:
+            e.grid = (self.gx.value(), self.gy.value(), self.gz.value())
+        if auto != self._auto0:
+            e.grid_auto = auto
+            if not auto:  # passer à la main écrit la place affichée
+                e.grid = (self.gx.value(), self.gy.value(), self.gz.value())
         return e
 
 
@@ -578,7 +709,7 @@ class ChannelDialog(QDialog):
     """Un canal de la charte DMX : attribut, adresses (coarse, fine…), valeur par défaut."""
 
     def __init__(self, title: str, attributes: list[str], attribute: str = "", offsets=None,
-                 default: str = "", parent=None):
+                 default: str = "", parent=None, ma3: bool = False):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(420)
@@ -589,7 +720,8 @@ class ChannelDialog(QDialog):
         self.offsets = QLineEdit(",".join(map(str, offsets or [])))
         self.offsets.setPlaceholderText("ex. 5   ou   5,6 pour 16 bits   (vide = virtuel)")
         self.default = QLineEdit(default)
-        self.default.setPlaceholderText("ex. 0/1   ou   32768/2")
+        self.default.setPlaceholderText("ex. 80007F (24 bits hexa)   ou   32768/2" if ma3
+                                        else "ex. 0/1   ou   32768/2")
         form = QFormLayout(self)
         form.setContentsMargins(18, 16, 18, 14)
         form.setVerticalSpacing(10)
@@ -604,7 +736,7 @@ class ChannelDialog(QDialog):
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
         self.setStyleSheet(f"QLineEdit {{ background: {theme.ROW.name()}; border: none;"
-                           f" border-radius: 6px; padding: 6px 10px; }}")
+                           f" border-radius: 6px; padding: 6px 24px 6px 10px; }}")
 
     def values(self) -> tuple[str, Optional[list[int]], str]:
         """(attribut, adresses ou None si illisibles, défaut)."""
@@ -644,7 +776,7 @@ class DuplicateDialog(QDialog):
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
         self.setStyleSheet(f"QSpinBox {{ background: {theme.ROW.name()}; border: none;"
-                           f" border-radius: 6px; padding: 6px 10px; }}")
+                           f" border-radius: 6px; padding: 6px 24px 6px 10px; }}")
 
     def values(self) -> tuple[int, list[int]]:
         return self.count.value(), [s.value() for s in self.steps]
@@ -653,9 +785,12 @@ class DuplicateDialog(QDialog):
 class EditDialog(QDialog):
     """Popup du double-clic : nom, type, adresse, grille d'une géométrie."""
 
-    def __init__(self, ft: FixtureType, g: Geometry, mode: str, parent=None):
+    def __init__(self, ft: FixtureType, g: Geometry, mode: str, parent=None, rows=None, on_channel=None):
+        """`rows()` : canaux contenus dans la géométrie (relus après chaque correction) ;
+        `on_channel(géométrie, attribut)` : corrige un canal (attribut vide = nouveau canal)."""
         super().__init__(parent)
         self.g, self.mode = g, mode
+        self._rows, self._on_channel = rows, on_channel
         self.setWindowTitle(f"Paramètres de « {g.name} »")
         self.setMinimumWidth(520)
         form = QFormLayout(self)
@@ -703,32 +838,104 @@ class EditDialog(QDialog):
         el = geotree.element_of(ft, g)
         gx, gy = (el.get("GridX"), el.get("GridY")) if el is not None else (None, None)
         px, py = geotree.grid_proposal(g, ft)
-        self._grid0 = (int(gx), int(gy)) if gx is not None and gy is not None else None
-        self.gx, self.gy = QSpinBox(), QSpinBox()
-        for spin, v in ((self.gx, gx if gx is not None else px), (self.gy, gy if gy is not None else py)):
+        gz = grid_z(g, ft)
+        self._grid0 = (int(gx), int(gy), gz) if gx is not None and gy is not None else None
+        self.gx, self.gy, self.gz = QSpinBox(), QSpinBox(), QSpinBox()
+        for spin, v in ((self.gx, gx if gx is not None else px), (self.gy, gy if gy is not None else py),
+                        (self.gz, gz)):
             spin.setRange(0, 999)
             spin.setValue(int(v))
         propose = QPushButton("Proposer")
         propose.setToolTip("Place proposée d'après les positions 3D du GDTF")
-        propose.clicked.connect(lambda: (self.gx.setValue(px), self.gy.setValue(py)))
+        propose.clicked.connect(lambda: (self.auto.setChecked(False), self.gx.setValue(px), self.gy.setValue(py)))
+        self.auto = _auto_box((self.gx, self.gy, self.gz))
+        self._auto0 = grid_auto(g, ft)
+        self.auto.setChecked(not self._auto0)
+        self.auto.setChecked(self._auto0)
         grid = QHBoxLayout()
+        grid.addWidget(self.auto)
+        grid.addSpacing(10)
         grid.addWidget(QLabel("X"))
         grid.addWidget(self.gx, 1)
         grid.addSpacing(10)
         grid.addWidget(QLabel("Y"))
         grid.addWidget(self.gy, 1)
         grid.addSpacing(10)
+        grid.addWidget(QLabel("Z"))
+        grid.addWidget(self.gz, 1)
+        grid.addSpacing(10)
         grid.addWidget(propose)
         form.addRow("Grille", grid)
 
+        # Jo, 13/11/2026 : « double-clic sur Head : accès à tous les canaux de la géométrie »
+        self.channels: Optional[QTableWidget] = None
+        if rows is not None:
+            title = QLabel(f"Canaux dans « {mode} »" + (f" (modèle « {g.reference} »)" if g.is_reference else "")
+                           + " — double-clic pour repatcher")
+            title.setFont(theme.font(10, True))
+            form.addRow(title)
+            self.channels = QTableWidget(0, 4)
+            self.channels.setHorizontalHeaderLabels(["Canal", "Attribut", "Bits", "Défaut"])
+            self.channels.verticalHeader().setVisible(False)
+            self.channels.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.channels.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.channels.setSelectionMode(QAbstractItemView.SingleSelection)
+            self.channels.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            self.channels.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            self.channels.setMinimumHeight(240)
+            self.channels.itemDoubleClicked.connect(self._channel_clicked)
+            form.addRow(self.channels)
+            row = QHBoxLayout()
+            add = QPushButton(f"+ Canal sur « {charte_dmx.carrier(g)} »")
+            add.clicked.connect(lambda: self._channel_asked(charte_dmx.carrier(g), ""))
+            mod = QPushButton("Modifier…")
+            mod.clicked.connect(lambda: self._channel_clicked(self.channels.item(self.channels.currentRow(), 0)))
+            rem = QPushButton("Retirer")
+            rem.clicked.connect(self._remove_clicked)
+            row.addWidget(add)
+            row.addStretch(1)
+            row.addWidget(mod)
+            row.addWidget(rem)
+            form.addRow(row)
+            self._fill_channels()
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Appliquer")
-        buttons.button(QDialogButtonBox.Cancel).setText("Annuler")
+        buttons.button(QDialogButtonBox.Cancel).setText("Fermer" if rows is not None else "Annuler")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
         self.setStyleSheet(f"QLineEdit, QSpinBox {{ background: {theme.ROW.name()}; border: none;"
-                           f" border-radius: 6px; padding: 6px 10px; }}")
+                           f" border-radius: 6px; padding: 6px 24px 6px 10px; }}")
+
+    def _fill_channels(self) -> None:
+        rows = self._rows()
+        self.channels.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            cells = ["/".join(map(str, r.offsets)) if r.offsets else "virtuel", r.attribute,
+                     str(r.bits), r.default]
+            for j, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                item.setData(Qt.UserRole, (r.geometry, r.attribute))
+                self.channels.setItem(i, j, item)
+
+    def channel_texts(self) -> list[str]:
+        """Lignes du tableau en texte (tests)."""
+        return ["  ".join(self.channels.item(i, j).text() for j in range(4))
+                for i in range(self.channels.rowCount())]
+
+    def _channel_clicked(self, item) -> None:
+        if item is not None:
+            self._channel_asked(*item.data(Qt.UserRole))
+
+    def _channel_asked(self, geo: str, attribute: str, what: str = "") -> None:
+        if self._on_channel is not None and self._on_channel(geo, attribute, what):
+            self._fill_channels()
+
+    def _remove_clicked(self) -> None:
+        item = self.channels.item(self.channels.currentRow(), 0)
+        if item is not None:
+            self._channel_asked(*item.data(Qt.UserRole), "remove")
 
     def edit(self) -> "geotree.Edit":
         e = geotree.Edit()
@@ -742,10 +949,270 @@ class EditDialog(QDialog):
                 e.breaks = vals
         if self.start is not None and self.start.value() != self._start0:
             e.start = (self.mode, self.start.value())
-        grid = (self.gx.value(), self.gy.value())
-        if grid != self._grid0:
+        grid = (self.gx.value(), self.gy.value(), self.gz.value())
+        auto = self.auto.isChecked()
+        if not auto and grid != self._grid0:
             e.grid = grid
+        if auto != self._auto0:
+            e.grid_auto = auto
+            if not auto:
+                e.grid = grid
         return e
+
+
+# --------------------------------------------------------------------------
+# Zone de droite : géométries disponibles (Jo, 13/11/2026) — créées (nom + type) ou importées
+# d'un autre fichier, à glisser dans l'arbre.
+
+@dataclass
+class Piece:
+    name: str
+    kind: str
+    source: str  # « nouvelle » ou « importée · <fixture> »
+    build: object  # fonction (fixture) -> (élément XML, mesh) au format de ce fixture
+    count: int = 1  # géométries dans le sous-arbre
+
+
+class PieceList(QWidget):
+    """Les géométries disponibles, en lignes comme l'arbre ; on les glisse dans l'arbre."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.pieces: list[Piece] = []
+        self.current = -1
+        self._press: Optional[QPointF] = None
+        self.setMinimumHeight(60)
+
+    def set_pieces(self, pieces: list[Piece]) -> None:
+        self.pieces = pieces
+        self.current = min(self.current, len(pieces) - 1)
+        self.setMinimumHeight(max(60, len(pieces) * 34 + 8))
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.fillRect(self.rect(), theme.BG)
+        if not self.pieces:
+            p.setPen(theme.TEXT_DIM)
+            p.setFont(theme.font(9))
+            p.drawText(self.rect(), Qt.AlignCenter, "Crée ou importe une géométrie")
+            return
+        for i, pc in enumerate(self.pieces):
+            r = QRectF(4, 4 + i * 34, self.width() - 8, 30)
+            sel = i == self.current
+            p.setPen(Qt.NoPen)
+            p.setBrush(theme.HEADER if sel else theme.ROW)
+            p.drawRoundedRect(r, 5, 5)
+            badge = BADGE.get(pc.kind, pc.kind[:4].upper())
+            p.setFont(theme.font(7, True))
+            bw = p.fontMetrics().horizontalAdvance(badge) + 12
+            br = QRectF(r.left() + 10, r.center().y() - 9, bw, 18)
+            p.setBrush(theme.STATUS["bleu"] if pc.kind == "Beam" else theme.ROW_HOVER)
+            p.drawRoundedRect(br, 9, 9)
+            p.setPen(theme.TEXT)
+            p.drawText(br, Qt.AlignCenter, badge)
+            p.setFont(theme.font(10, sel))
+            name = pc.name + (f"  ({pc.count})" if pc.count > 1 else "")
+            src_w = int(r.width() * 0.45)
+            p.drawText(QRectF(br.right() + 10, r.top(), r.right() - br.right() - src_w - 20, 30),
+                       Qt.AlignVCenter, name)
+            p.setFont(theme.font(9))
+            p.setPen(theme.TEXT_DIM)
+            p.drawText(QRectF(r.right() - src_w - 10, r.top(), src_w, 30), Qt.AlignVCenter | Qt.AlignRight,
+                       p.fontMetrics().elidedText(pc.source, Qt.ElideLeft, src_w))
+
+    def _index_at(self, pos) -> int:
+        i = int((pos.y() - 4) // 34)
+        return i if 0 <= i < len(self.pieces) else -1
+
+    def mousePressEvent(self, e):
+        self.current = self._index_at(e.position())
+        self._press = e.position() if self.current >= 0 else None
+        self.update()
+
+    def mouseMoveEvent(self, e):
+        if self._press is None or not (e.buttons() & Qt.LeftButton):
+            return
+        if (e.position() - self._press).manhattanLength() < 8:
+            return
+        self._press = None
+        data = QMimeData()
+        data.setData(PIECE_MIME, str(self.current).encode())
+        data.setText(self.pieces[self.current].name)
+        drag = QDrag(self)
+        drag.setMimeData(data)
+        drag.exec(Qt.CopyAction)
+
+
+class GeoBank(QWidget):
+    """Créer une géométrie (nom, type, modèle, mesh) ou en importer ; « Géométries disponibles »."""
+
+    importAsked = Signal()
+    addAsked = Signal(int)  # « Ajouter sous la sélection »
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.pieces: list[Piece] = []
+        title = QLabel("Géométries")
+        title.setFont(theme.font(12, True))
+        hint = QLabel("Crée ou importe des géométries, puis glisse-les dans l'arbre.")
+        hint.setObjectName("dim")
+        hint.setWordWrap(True)
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("ex. Pixel")
+        self.kind = QComboBox()
+        self.kind.addItems(list(geotree.NEW_KINDS))
+        self.kind.setCurrentText("Beam")
+        self.kind.currentTextChanged.connect(self._kind_changed)
+        self.model = QComboBox()
+        self.model.setPlaceholderText("pour une référence")
+        self.mesh = QComboBox()
+        self.create = QPushButton("+ Créer")
+        self.create.setFont(theme.font(10, True))
+        self.create.clicked.connect(self._create)
+        self.name.returnPressed.connect(self._create)
+        self.list = PieceList()
+        imp = QPushButton("Importer d'un fichier…")
+        imp.setToolTip("Prendre des géométries (avec leurs enfants) dans un GDTF ou un XML de la console")
+        imp.clicked.connect(lambda: self.importAsked.emit())
+        add = QPushButton("Ajouter sous la sélection")
+        add.clicked.connect(lambda: self.addAsked.emit(self.list.current) if self.list.current >= 0 else None)
+        rem = QPushButton("Retirer")
+        rem.setToolTip("Retire de la liste (pas de l'arbre)")
+        rem.clicked.connect(self._remove)
+        self.message = QLabel()
+        self.message.setObjectName("dim")
+        self.message.setWordWrap(True)
+
+        def section(text):
+            lab = QLabel(text)
+            lab.setFont(theme.font(9, True))
+            lab.setObjectName("dim")
+            return lab
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 10)
+        lay.setSpacing(8)
+        lay.addWidget(title)
+        lay.addWidget(hint)
+        lay.addSpacing(4)
+        lay.addWidget(section("NOUVELLE GÉOMÉTRIE"))
+        form = QFormLayout()
+        form.setHorizontalSpacing(14)
+        form.addRow("Nom", self.name)
+        form.addRow("Type", self.kind)
+        form.addRow("Modèle", self.model)
+        form.addRow("Mesh", self.mesh)
+        lay.addLayout(form)
+        row = QHBoxLayout()
+        row.addWidget(self.message, 1)
+        row.addWidget(self.create)
+        lay.addLayout(row)
+        lay.addSpacing(8)
+        lay.addWidget(section("GÉOMÉTRIES DISPONIBLES  —  à glisser dans l'arbre"))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.list)
+        scroll.setMinimumHeight(150)
+        lay.addWidget(scroll, 1)
+        buttons = QHBoxLayout()
+        for b in (imp, add, rem):
+            buttons.addWidget(b)
+        lay.addLayout(buttons)
+        tip = QLabel("Glisser sur une ligne = enfant de cette ligne · entre deux lignes = à cette place.\n"
+                     "Une géométrie posée arrive sans canal.")
+        tip.setObjectName("dim")
+        tip.setWordWrap(True)
+        lay.addWidget(tip)
+        self._kind_changed(self.kind.currentText())
+        self.ft: Optional[FixtureType] = None
+
+    def set_fixture(self, ft: Optional[FixtureType]) -> None:
+        """Modèles (pour une référence) et meshes de ce fixture."""
+        self.ft = ft
+        for combo, items in ((self.model, geotree.models(ft) if ft else []),
+                             (self.mesh, [NO_MESH] + (geotree.meshes(ft) if ft else []))):
+            cur = combo.currentText()
+            combo.clear()
+            combo.addItems(items)
+            if cur and combo.findText(cur) >= 0:
+                combo.setCurrentText(cur)
+        if self.model.currentIndex() < 0 and self.model.count():
+            self.model.setCurrentIndex(0)
+        self._kind_changed(self.kind.currentText())
+
+    def _kind_changed(self, kind: str) -> None:
+        ref = kind == "GeometryReference"
+        self.model.setEnabled(ref)
+        self.mesh.setEnabled(not ref)  # une référence prend le mesh de son modèle
+
+    def _create(self) -> None:
+        name, kind = self.name.text().strip(), self.kind.currentText()
+        model = self.model.currentText() if kind == "GeometryReference" else ""
+        mesh = "" if kind == "GeometryReference" or self.mesh.currentText() in ("", NO_MESH) else self.mesh.currentText()
+        if self.ft is not None:  # vérifié tout de suite : nom, modèle
+            try:
+                geotree.new_geometry(self.ft, name, kind, model)
+            except geotree.MoveError as exc:
+                self.message.setText(f"Impossible : {exc}")
+                QMessageBox.warning(self, "Impossible", str(exc)[:1].upper() + str(exc)[1:])
+                return
+        label = f"{name}  → {model}" if model else name
+        self.add(Piece(label, kind, "nouvelle",
+                       lambda ft, n=name, k=kind, m=model, me=mesh: (geotree.new_geometry(ft, n, k, m), me)))
+        self.message.setText("")
+        self.name.clear()
+
+    def add(self, piece: Piece) -> None:
+        self.pieces.append(piece)
+        self.list.current = len(self.pieces) - 1
+        self.list.set_pieces(self.pieces)
+
+    def _remove(self) -> None:
+        i = self.list.current
+        if 0 <= i < len(self.pieces):
+            del self.pieces[i]
+            self.list.set_pieces(self.pieces)
+
+
+class ImportDialog(QDialog):
+    """Choisir les géométries à prendre dans un autre fichier (arbre indenté, plusieurs à la fois)."""
+
+    def __init__(self, other: FixtureType, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Importer de « {other.manufacturer} - {other.name} »")
+        self.resize(520, 560)
+        self.items: list[Geometry] = []
+        self.list = QListWidget()
+        self.list.setSelectionMode(QListWidget.ExtendedSelection)
+
+        def add(g: Geometry, depth: int) -> None:
+            badge = BADGE.get(g.kind, g.kind[:4].upper())
+            extra = f"  → {g.reference}" if g.is_reference else (f"   ({len(list(g.walk())) - 1} enfants)"
+                                                                  if g.children else "")
+            self.list.addItem(QListWidgetItem("      " * depth + f"[{badge}]  {g.name}{extra}"))
+            self.items.append(g)
+            for c in g.children:
+                add(c, depth + 1)
+
+        for top in other.geometries:
+            add(top, 0)
+        info = QLabel("Choisis une ou plusieurs géométries (Ctrl / Maj). Chacune arrive avec ses enfants ; "
+                      "une référence arrive comme une copie de son modèle. Aucun canal n'est copié.")
+        info.setWordWrap(True)
+        info.setObjectName("dim")
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Importer")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addWidget(info)
+        lay.addWidget(self.list, 1)
+        lay.addWidget(buttons)
+
+    def chosen(self) -> list[Geometry]:
+        return [self.items[self.list.row(it)] for it in self.list.selectedItems()]
 
 
 class AtelierWindow(QMainWindow):
@@ -787,10 +1254,30 @@ class AtelierWindow(QMainWindow):
         self.params.setFixedWidth(400)
         self.params.applied.connect(self._apply_params)
         self.params.channelAsked.connect(self._channel)
+        self.tree.pieceDropped.connect(self._place_piece)
+        self.bank = GeoBank()
+        self.bank.importAsked.connect(self._import_pieces)
+        self.bank.addAsked.connect(self._add_piece_here)
+        left = QWidget()
+        lh = QHBoxLayout(left)
+        lh.setContentsMargins(0, 0, 0, 0)
+        lh.setSpacing(0)
+        lh.addWidget(scroll, 1)
+        lh.addWidget(self.params)
+        # Jo, 13/11/2026 : création à droite, avec son séparateur vertical
+        self.split = QSplitter(Qt.Horizontal)
+        self.split.setHandleWidth(8)
+        self.split.setChildrenCollapsible(False)
+        self.split.addWidget(left)
+        self.split.addWidget(self.bank)
+        self.split.setStretchFactor(0, 3)
+        self.split.setStretchFactor(1, 1)
+        self.split.setStyleSheet(f"QSplitter::handle {{ background: {theme.PANEL.name()}; "
+                                 f"border-left: 1px solid {theme.ROW_HOVER.name()}; "
+                                 f"border-right: 1px solid {theme.ROW_HOVER.name()}; }}")
         mid = QHBoxLayout()
         mid.setSpacing(0)
-        mid.addWidget(scroll, 1)
-        mid.addWidget(self.params)
+        mid.addWidget(self.split, 1)
 
         self.summary = QLabel()
         self.summary.setFont(theme.font(10))
@@ -862,18 +1349,53 @@ class AtelierWindow(QMainWindow):
         self.modes.blockSignals(False)
         self.export_button.setEnabled(True)
         self.compare_button.setEnabled(True)
+        self.bank.set_fixture(self.ft)
+        self.split_button.setEnabled(True)  # toujours cliquables : un refus s'explique (Jo, 13/11/2026)
+        self.strip_button.setEnabled(True)
         self._mode_changed()
 
     def split_per_mode(self) -> None:
         if not self.ft:
             return
         current = self.modes.currentText()
+        if not geotree.shared_trees(self.ft):
+            self._tell("Chaque mode a déjà sa propre base (ou aucun mode n'a plusieurs instances) : rien à séparer")
+            return
         if self._apply(geotree.split_per_mode):
-            self.modes.setCurrentText(current)
+            self._select_mode(current)
             self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
 
+    def _select_mode(self, name: str) -> None:
+        self.modes.blockSignals(True)
+        self.modes.clear()
+        self.modes.addItems([m.name for m in self.ft.modes])
+        self.modes.setCurrentText(name)
+        self.modes.blockSignals(False)
+
     def strip_3d(self) -> None:
-        if self.ft and self._apply(geotree.strip_3d):
+        if not self.ft:
+            return
+        current = self.modes.currentText()
+        mode = self.ft.mode(current)
+        hidden = geotree.hidden_3d(self.ft, mode) if mode else []
+        if hidden and geotree.shared_trees(self.ft):
+            names = ", ".join(g.name for g in hidden[:4]) + ("…" if len(hidden) > 4 else "")
+            ok = QMessageBox.question(
+                self, "Retirer la 3D",
+                f"Dans le mode « {current} », {len(hidden)} géométrie(s) n'ont aucun canal ({names}), "
+                "mais un autre mode les utilise : tous les modes partagent le même arbre.\n\n"
+                "Donner d'abord à chaque mode sa propre base, puis retirer la 3D ?\n"
+                "(Les adresses ne bougent pas, Ctrl+Z annule.)")
+            if ok != QMessageBox.Yes:
+                return
+            if self._apply(geotree.split_then_strip):
+                self._select_mode(current)
+                self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
+            return
+        if not geotree.channel_less(self.ft):
+            self._tell("Rien à retirer : toutes les géométries portent des canaux")
+            return
+        if self._apply(geotree.strip_3d):
             self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
 
     def export(self) -> None:
@@ -889,6 +1411,7 @@ class AtelierWindow(QMainWindow):
             return
         mode = self.ft.mode(self.modes.currentText())
         root = self.ft.top_level(mode.geometry) if mode else None
+        self._diagnose()
         self.tree.set_root(root, self.useless, self.doubles, self._idents(), self.copies,
                            self._models(root))
         self._summary()
@@ -905,7 +1428,11 @@ class AtelierWindow(QMainWindow):
 
     def _diagnose(self) -> None:
         # tout ce qui ne porte aucun canal, Beams compris (Jo, 10/11/2026 : la 3D ne l'intéresse pas)
+        # par mode : un arbre partagé garde des géométries sans canal dans ce mode
+        mode = self.ft.mode(self.modes.currentText()) if self.modes.count() else None
         self.useless = {g.name for g in geotree.channel_less(self.ft)}
+        if mode is not None:
+            self.useless |= {g.name for g in geotree.channel_less(self.ft, mode)}
         self.doubles = {n for grp in diagnostic.duplicate_templates(self.ft) for n in grp}
         self.copies = {n: len(g.names) for g in diagnostic.find_instance_groups(self.ft)
                        if not g.per_mode_variants for n in g.names}
@@ -917,6 +1444,7 @@ class AtelierWindow(QMainWindow):
 
     def _after_change(self, message: str) -> None:
         self._diagnose()
+        self.bank.set_fixture(self.ft)  # nouveaux modèles / meshes
         mode = self.ft.mode(self.modes.currentText())
         root = self.ft.top_level(mode.geometry) if mode else None
         self.tree.refresh(root, self.useless, self.doubles, self._idents(), self.copies,
@@ -927,13 +1455,23 @@ class AtelierWindow(QMainWindow):
         self.status.setText(message)
         self.setWindowTitle(TITLE + (" •" if self.history else ""))
 
+    def _refuse(self, reason: str) -> None:
+        """Refus expliqué dans une fenêtre (Jo, 13/11/2026 : « pas de message quand ça refuse »)."""
+        self.status.setText(f"Impossible : {reason}")
+        QMessageBox.warning(self, "Impossible", reason[:1].upper() + reason[1:])
+
+    def _tell(self, text: str) -> None:
+        """Opération sans effet : on le dit aussi dans une fenêtre."""
+        self.status.setText(text)
+        QMessageBox.information(self, APP_NAME, text)
+
     def _apply(self, action, *args) -> bool:
         """Lance une opération de geotree, garde de quoi annuler, affiche le résultat."""
         before = geotree.snapshot(self.ft)
         try:
             result = action(self.ft, *args)
         except geotree.MoveError as exc:
-            self.status.setText(f"Impossible : {exc}")
+            self._refuse(str(exc))
             return False
         if isinstance(result, tuple):  # opérations qui relisent le fixture
             self.ft, message = result
@@ -942,6 +1480,54 @@ class AtelierWindow(QMainWindow):
         self.history.append(before)
         self._last = message
         return True
+
+    def _place_piece(self, i: int, parent: Geometry, index: int) -> None:
+        """Une géométrie disponible lâchée dans l'arbre : posée sans canal, Ctrl+Z annule."""
+        if not self.ft or not 0 <= i < len(self.bank.pieces):
+            return
+        piece = self.bank.pieces[i]
+
+        def place(ft):
+            el, mesh = piece.build(ft)
+            return geotree.add_geometry(ft, el, parent, index, mesh)
+
+        if self._apply(place):
+            self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
+
+    def _add_piece_here(self, i: int) -> None:
+        """« Ajouter sous la sélection » : en dernier enfant de la ligne choisie ; sur une
+        référence (qui n'a pas d'enfant), juste après elle."""
+        g = self.tree.current
+        if g is None:
+            self._refuse("choisis d'abord une ligne dans l'arbre")
+            return
+        if g.is_reference:
+            self._place_piece(i, g.parent, g.parent.children.index(g) + 1)
+        else:
+            self._place_piece(i, g, len(g.children))
+
+    def _import_pieces(self) -> None:
+        if not self.ft:
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Importer des géométries", "",
+                                              "Fixtures (*.gdtf *.xml);;GDTF (*.gdtf);;XML MA3 (*.xml)")
+        if not path:
+            return
+        try:
+            other = geotree.importable(path)
+        except geotree.MoveError as exc:
+            self._refuse(str(exc))
+            return
+        dlg = ImportDialog(other, self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        for g in dlg.chosen():
+            kind = (other.top_level(g.reference).kind if g.is_reference and other.top_level(g.reference)
+                    else g.kind)
+            self.bank.add(Piece(g.name, kind, f"importée · {other.name}",
+                                lambda ft, o=other, x=g: (geotree.take_geometry(o, x, ft), ""),
+                                len(list(g.walk()))))
+        self.status.setText(f"{len(dlg.chosen())} géométrie(s) de « {other.name} » ajoutée(s) aux disponibles")
 
     def _move(self, geos: list, parent: Geometry, index: int) -> None:
         if self._apply(geotree.move, geos, parent, index):
@@ -985,10 +1571,13 @@ class AtelierWindow(QMainWindow):
 
     def _edit(self, g: Geometry) -> None:
         mode = self.modes.currentText()
-        dlg = EditDialog(self.ft, g, mode, self)
+        name = g.name
+        rows = lambda: charte_dmx.lignes(self.ft, mode, self.ft.geometry(name) or g)
+        dlg = EditDialog(self.ft, g, mode, self, rows, self._edit_channel)
         if dlg.exec() == QDialog.Accepted:
             edit = dlg.edit()
-            if self._apply(geotree.apply_edit, g, edit):
+            g = self.ft.geometry(name) or g  # le fixture a pu être relu (canaux corrigés)
+            if any(v is not None for v in vars(edit).values()) and self._apply(geotree.apply_edit, g, edit):
                 self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
 
     def _merge(self, names: list) -> None:
@@ -1007,8 +1596,6 @@ class AtelierWindow(QMainWindow):
         n3d = len(names & self.useless)
         refs = {g.reference for g in root.walk() if g.is_reference} if root else set()
         ndbl = len((names | refs) & self.doubles)
-        self.strip_button.setEnabled(bool(self.useless))
-        self.split_button.setEnabled(self.ft.format == "gdtf" and bool(geotree.shared_trees(self.ft)))
         dot = lambda c: f"<span style='color:{c}; font-size:15px'>●</span>"
         self.summary.setText(
             f"Nettoyage proposé pour ce mode :  {dot(theme.TEXT_DIM.name())} {n3d} géométrie(s) 3D seule(s)"
@@ -1027,7 +1614,13 @@ class AtelierWindow(QMainWindow):
         g = self.params.geo
         if self.ft is None or g is None:
             return
-        mode, geo = self.modes.currentText(), charte_dmx.carrier(g)
+        self._edit_channel(charte_dmx.carrier(g), attribute, what)
+
+    def _edit_channel(self, geo: str, attribute: str, what: str = "") -> bool:
+        """Ajoute (attribut vide), modifie ou retire un canal de `geo` dans le mode affiché."""
+        mode = self.modes.currentText()
+        what = what or ("edit" if attribute else "add")
+        ok = False
         if what == "remove":
             ok = self._apply(charte_dmx.retirer, mode, geo, attribute)
         else:
@@ -1036,25 +1629,30 @@ class AtelierWindow(QMainWindow):
                 try:
                     free = [charte_dmx.libre(self.ft, mode, geo)]
                 except geotree.MoveError as exc:
-                    self.status.setText(f"Impossible : {exc}")
-                    return
+                    self._refuse(str(exc))
+                    return False
                 dlg = ChannelDialog(f"Nouveau canal sur « {geo} »", known, "", free, "", self)
             else:
-                row = next(r for r in charte_dmx.lignes(self.ft, mode, g) if r.attribute == attribute)
+                row = next((r for r in charte_dmx.lignes(self.ft, mode, self.ft.geometry(geo))
+                            if r.attribute == attribute), None)
+                if row is None:
+                    self._refuse(f"canal « {geo}_{attribute} » introuvable dans « {mode} »")
+                    return False
                 dlg = ChannelDialog(f"Canal « {geo}_{attribute} »", known, attribute, row.offsets,
-                                    row.default, self)
+                                    row.default, self, self.ft.format == "ma3")
             if dlg.exec() != QDialog.Accepted:
-                return
+                return False
             new, offsets, default = dlg.values()
             if offsets is None:
-                self.status.setText("Impossible : adresses illisibles (attendu 5 ou 5,6)")
-                return
+                self._refuse("adresses illisibles (attendu 5 ou 5,6)")
+                return False
             if what == "add":
                 ok = self._apply(charte_dmx.ajouter, mode, geo, new, offsets)
             else:
                 ok = self._apply(charte_dmx.modifier, mode, geo, attribute, offsets, new, default or None)
         if ok:
             self._after_change(f"{self._last}   ·   Ctrl+Z pour annuler")
+        return ok
 
     def _apply_params(self) -> None:
         """Bouton « Appliquer » du panneau : référence (modèle choisi ou créé), puis nom, type,
@@ -1102,9 +1700,10 @@ class AtelierWindow(QMainWindow):
         except geotree.MoveError as exc:
             self.ft = geotree.restore(self.ft, before) if done else self.ft
             self._after_change(f"Impossible : {exc}")
+            self._refuse(str(exc))
             return
         if not done:
-            self.status.setText("Rien à changer")
+            self._tell("Rien à changer")
             return
         self.history.append(before)
         self._after_change("   ·   ".join(done) + "   ·   Ctrl+Z pour annuler")
